@@ -62,6 +62,19 @@
 | **做簡報** `make-slides` | 用 make-slides 把文獻卡做成 8 分鐘的報告 | `slides.pptx`：可以用 PowerPoint 打開修改 |
 | **一次跑完** `lit-pipeline` | 用 lit-pipeline 幫我做選擇權定價的文獻報告 | 依序跑完上面四步 |
 
+### 找你自己領域的期刊
+
+找文獻的工具內建 8 本選擇權相關期刊。要查別的期刊：
+
+1. 到國科會「[各學門審查參考原則](https://www.nstc.gov.tw/hum/ch/detail/da71f59b-9ab8-41f4-ae93-5973e0701cc7)」找你的學門；財金是「**財金及會計**」，它的審查參考原則 PDF 附有期刊分級報告（例如[財務領域國際期刊分級排序](https://www.nstc.gov.tw/nstc/attachments/00b9d9bb-2bf8-4e02-822a-8e48eee82404)）
+2. 挑幾本期刊，跟 OpenCode 說：
+
+```
+請把 Journal of Banking and Finance、Journal of Corporate Finance 加進期刊對照表，等級是國科會 A Tier-1
+```
+
+它會用程式到 OpenAlex 查 ISSN；遇到**同名期刊會停下來問你選哪一本**，等級也只照你說的寫。
+
 ### write-review 需要多做一步
 
 寫文獻回顧時，「逐篇初篩」是由程式一篇一篇直接問模型（避免 AI 偷懶），所以程式要拿得到你的 Ollama key。請擇一：
