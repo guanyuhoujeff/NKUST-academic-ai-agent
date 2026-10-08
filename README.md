@@ -11,12 +11,9 @@
 ## 一、下載
 
 1. 按這一頁上方綠色的 **Code** → **Download ZIP**
-2. 解壓縮到一個**短的路徑**：
-   - Windows：`C:\aiwork`
-   - Mac：家目錄底下的 `aiwork`
+2. 解壓縮到**你自己規劃的工作資料夾**（放哪裡、取什麼名字由你決定）
 3. 打開看看，裡面要有 `AGENTS.md` 和 `.opencode` 資料夾（`.opencode` 開頭有一個點，Mac 要按 `Cmd + Shift + .` 才看得到）
 
-> ⚠ 不要放在很深的資料夾裡（例如「桌面\課程\115-1\講座\…」）。Windows 實測：路徑太長時，AI 寫檔會被系統拒絕，而且它自己不知道。
 
 ---
 
@@ -34,7 +31,7 @@
 1. OpenCode 設定 → 模型供應商 → **Ollama Cloud** → 貼上你的 Ollama key
 2. 🔴 **一定要把模型換成 `gpt-oss:120b`**。預設的模型不在免費方案裡，用了會失敗。
    - 很慢或出錯時，備用：`gemma4:31b`、`nemotron-3-ultra`
-3. 用 OpenCode **開啟 `aiwork` 這個資料夾**
+3. 用 OpenCode **開啟你的工作資料夾**
 
 ### Python 和 nlm：叫 AI 幫你裝
 
@@ -67,7 +64,7 @@
 
 寫文獻回顧時，「逐篇初篩」是由程式一篇一篇直接問模型（避免 AI 偷懶），所以程式要拿得到你的 Ollama key。請擇一：
 
-- 在 `aiwork` 資料夾裡建一個檔案 `.ollama_key`，內容只有你的 Ollama key 一行；或
+- 在工作資料夾裡建一個檔案 `.ollama_key`，內容只有你的 Ollama key 一行；或
 - 把 key 設成環境變數 `OLLAMA_API_KEY`，再重開 OpenCode
 
 > 🔒 **不要把 key 貼到對話裡，也不要上傳到 GitHub。** 這個資料夾的 `.gitignore` 已經排除 `.ollama_key`。
@@ -77,7 +74,7 @@
 ## 四、資料夾裡有什麼
 
 ```
-aiwork/
+你的工作資料夾/
 ├── AGENTS.md            AI 的工作守則（每次開工都會先讀）
 ├── .opencode/
 │   ├── skills/          四個工具，每個都是「說明書 SKILL.md ＋ 檢查程式 scripts/」
