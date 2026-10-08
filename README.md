@@ -38,8 +38,10 @@
 在 OpenCode 輸入：
 
 ```
-請檢查我的電腦有沒有 Python 3.11 以上和 nlm，沒有就幫我裝
+請檢查我的電腦有沒有 Python 3.11 以上，然後幫我安裝 nlm：套件名稱是 notebooklm-mcp-cli（https://pypi.org/project/notebooklm-mcp-cli/），裝完執行 nlm --version 確認
 ```
+
+> 一定要講出套件名稱。`nlm` 只是指令的名字，只說「nlm」的話，AI 會去裝一個不存在的 `nlm` 套件然後失敗。
 
 它會自己檢查、自己安裝。有兩件事要你自己來：
 
@@ -112,4 +114,5 @@
 | 模型一直沒反應或出錯 | 確認模型是 `gpt-oss:120b`；不行就換 `gemma4:31b` |
 | AI 說「已經完成」，但找不到檔案 | 這就是為什麼要驗收。請它「列出產出檔案的完整路徑」，再自己打開檔案總管確認 |
 | Windows 上 `python` 指令無效 | 改用 `py` |
+| 裝好 nlm 卻說找不到指令 | 請 AI 改用 `python -m notebooklm_tools.cli.main` |
 | 找不到 `.opencode` 資料夾 | 它是隱藏資料夾；Mac 按 `Cmd + Shift + .`，Windows 在檔案總管「檢視」勾選「隱藏的項目」 |
