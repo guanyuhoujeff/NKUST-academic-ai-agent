@@ -12,7 +12,9 @@ description: 找學術文獻時使用。向 OpenAlex 查詢指定期刊、指定
 ### 0. 確認 OpenAlex 金鑰
 查詢要帶金鑰，否則會和同一個網路上的所有人共用一個很小的額度。金鑰放在環境變數 `OPENALEX_API_KEY`。
 
-1. 用 Shell 工具查環境變數有沒有值（Windows PowerShell 用 `echo $env:OPENALEX_API_KEY`；macOS／Linux 用 `echo $OPENALEX_API_KEY`）。
+1. 用 Shell 工具查環境變數有沒有值。**只看有沒有值，不要把金鑰印出來**（畫面可能正在投影，印出來也會留在對話紀錄裡）：
+   - Windows PowerShell：`if ($env:OPENALEX_API_KEY) { "有值" } else { "沒有值" }`
+   - macOS／Linux：`[ -n "$OPENALEX_API_KEY" ] && echo 有值 || echo 沒有值`
 2. **有值**：直接用，不用再問。
 3. **沒有值**：停下來請使用者提供金鑰，並附上申請網址 https://openalex.org/settings/api （免費，不用信用卡）。在使用者給金鑰之前不要往下做，也不要用沒有金鑰的網址查詢。
 4. 使用者在對話中給了金鑰之後，**收到金鑰的第一個動作**是用 Shell 工具執行下面這行，把金鑰存起來讓下次不用再問；**做完這行才可以開始查詢**：
@@ -21,12 +23,14 @@ description: 找學術文獻時使用。向 OpenAlex 查詢指定期刊、指定
    然後告訴使用者「金鑰已存入環境變數，重開 OpenCode 後生效；本次先直接用這把金鑰繼續」。
 
 ### 1. 確認三件事
-- **主題關鍵字**：用英文，例如 `option pricing`。
-- **期刊**：使用者指定的期刊。
+- **主題關鍵字**：用英文，例如 `option pricing`。OpenAlex 收錄的論文幾乎都是英文，用中文查一定是 0 筆。
+  - 使用者給的是英文 → 直接用。
+  - 使用者給的是中文（例如「數位轉型」）→ **這一輪只做翻譯，不查詢**：列出 1–3 個你認為對應的英文學術用語（例如 `digital transformation`），請使用者選一個或自己改，然後結束。中文詞和英文術語常常對不上（例如「漂綠」是 `greenwashing`，不是 `green`），由使用者確認才不會查錯方向。使用者下一個指令給了英文詞，再從步驟 2 往下做。
+- **期刊**：使用者指定的期刊。沒指定就問使用者要查哪一本；不可以不限期刊查（會撈到幾千筆）。
 - **起始年**：使用者沒說就用 2015。
 
 ### 2. 把刊名換成 ISSN
-讀 `references/journals.md`，找到該期刊的 ISSN。
+讀 `.opencode/skills/fetch-literature/references/journals.md`（路徑從工作資料夾算起），找到該期刊的 ISSN。
 
 **期刊一律用 ISSN 指定，不可以用刊名搜尋。** 刊名只是一串字，會撞名：在 OpenAlex 用 `journal of finance` 搜刊名會搜到 447 本不同的期刊。ISSN 是國際標準編號，一本期刊一個。
 
@@ -46,10 +50,10 @@ description: 找學術文獻時使用。向 OpenAlex 查詢指定期刊、指定
 4. 一次整理很多本時，做完列一張表回報：哪幾本加進去了、哪幾本等使用者選、哪幾本查不到。
 
 ### 3. 組出查詢網址
-把步驟 0 取得的金鑰和前面確認的條件，照這個樣板填入：
+把前面確認的條件照這個樣板填入。金鑰的地方**照抄 `$OPENALEX_API_KEY`**（Windows 寫 `$env:OPENALEX_API_KEY`），執行時 shell 會自己代入，你從頭到尾不需要知道金鑰是什麼：
 
 ```
-https://api.openalex.org/works?filter=primary_location.source.issn:【ISSN】,primary_location.source.is_core:true,title_and_abstract.search:%22【關鍵字】%22,from_publication_date:【起始年】-01-01&sort=cited_by_count:desc&per-page=10&select=doi,title,publication_year,cited_by_count,authorships,primary_location&api_key=【金鑰】
+https://api.openalex.org/works?filter=primary_location.source.issn:【ISSN】,primary_location.source.is_core:true,title_and_abstract.search:%22【關鍵字】%22,from_publication_date:【起始年】-01-01&sort=cited_by_count:desc&per-page=10&select=doi,title,publication_year,cited_by_count,authorships,primary_location&api_key=$OPENALEX_API_KEY
 ```
 
 - 關鍵字裡的空白要換成 `%20`，例如 `option%20pricing`。
@@ -57,22 +61,35 @@ https://api.openalex.org/works?filter=primary_location.source.issn:【ISSN】,pr
 - `title_and_abstract.search` 只比對標題與摘要。不要改成 `default.search`，那會連全文一起比對，撈進一堆不相關的論文。
 
 ### 4. 送出查詢
-用 webfetch 工具抓這個網址（格式選 text）。webfetch 失敗就改用 `curl -s "網址"`。
+用 Shell 工具執行 curl，網址用雙引號包起來：
+- macOS／Linux：`curl -s "網址"`
+- Windows PowerShell：`curl.exe -s "網址"`（要寫 `curl.exe`，PowerShell 的 `curl` 是另一個指令）
 
-回傳的 `meta.count` 是符合條件的總筆數，`results` 是論文清單。
+不要用 webfetch 工具：它讀不到環境變數，你就得把金鑰貼進網址，金鑰會留在對話紀錄裡。
 
-### 5. 寫成 literature.md
+回傳的 `meta.count` 是符合條件的總筆數，`results` 是論文清單。看 `meta.count` 決定下一步：
+- 不是 0 → 做步驟 5a。
+- 是 0 → 做步驟 5b，不做 5a。
+
+### 5a. 有結果：寫成 literature.md
 在工作資料夾寫出 `literature.md`（用相對路徑 `literature.md`，**不可以寫到 `/tmp` 或其他資料夾**），內容：
 
 1. 標題與一行查詢條件（主題、期刊與 ISSN、起始年、總筆數、查詢日期）。
 2. 一張表格，每篇論文一列，欄位依序為：年份｜作者｜標題｜期刊｜被引數｜DOI。
    - 作者取 `authorships` 裡每個人的 `author.display_name`，超過三位就寫前三位加「等」。
    - 標題、作者、DOI **照回傳內容原樣抄寫**，不可改寫、不可翻譯、不可補上回傳內容裡沒有的論文。
-3. 表格下方附上實際送出的查詢網址，但要把金鑰換成 `***`。
+3. 表格下方附上實際送出的查詢網址（網址裡的金鑰就保持 `$OPENALEX_API_KEY` 的寫法）。
 
-查詢結果是 0 筆時，照實寫「0 筆」，不要自己補論文。
+### 5b. 0 筆：回報並結束
+0 筆通常不是程式錯，是「這本期刊不做這個主題」或「論文用的是別的說法」。這一輪到此結束，不寫 `literature.md`，回覆使用者三件事：
 
-## 檢查（交出去之前一定要做）
+1. 查了什麼：期刊、英文關鍵字、起始年，結果 0 筆。
+2. 建議一，**換期刊**：對照表裡的期刊是為某個主題挑的，換主題就要換期刊。請使用者提供他領域的期刊（例如國科會學門期刊分級），照「新增期刊」加進來再查。
+3. 建議二，**換說法**：提出 2–3 個英文同義詞（例如 digital transformation → digitalization、fintech）。
+
+要不要換、換哪個，由使用者的下一個指令決定；這一輪不要自己換了再查。
+
+## 檢查（走 5a 時，交出去之前一定要做）
 
 1. 列出工作資料夾的檔案，確認 `literature.md` 就在裡面；再讀回來，確認表格列數等於回傳的論文數。
 2. 確認每一列的 DOI 都以 `https://doi.org/` 開頭。
