@@ -52,15 +52,17 @@
 
 ## 三、四個工具（skill）怎麼用
 
-在 OpenCode 裡**直接用中文跟它說**就好。每個工具都會在重要的地方停下來問你，你確認了才會往下做。
+在 OpenCode 裡**直接用中文跟它說**就好。前四個工具會在重要的地方停下來問你，你確認了才會往下做；`lit-pipeline` 中途不停，做完一次回報。
+
+> 下載或新增 skill 之後，請把 OpenCode **整個關掉再打開**。它只在啟動時讀一次有哪些 skill，按 `/new` 不會重新載入。
 
 | 工具 | 跟它說 | 你會拿到 |
 |---|---|---|
-| **找文獻** `fetch-literature` | 用 fetch-literature 找 The Journal of Finance 2015 年以後，option pricing 的論文 | `literature.md`：附 DOI 的文獻清單 |
-| **分析文獻** `analyze-literature` | 用 analyze-literature 分析 papers/ 裡的論文<br>（先把 PDF 放進 `papers` 資料夾） | `notes/` 裡每篇一張**文獻卡**，每一點都標了原文頁碼 |
+| **找文獻** `fetch-literature` | 用 fetch-literature 找頂刊 option pricing 的論文，存成 literature-option-pricing.md | 你指定的檔名（不說就是 `literature.md`，同名會覆蓋）：附 DOI 的文獻清單。「頂刊」＝期刊對照表裡的全部期刊；要限年份或指定期刊就直接說 |
+| **分析文獻** `analyze-literature` | 用 analyze-literature 分析 papers/ 裡的論文<br>（先把 PDF 放進 `papers` 資料夾） | `notes/` 裡每篇一張**文獻卡**，每一點都標了原文頁碼。每篇會在你的 Google 帳號留一個 NotebookLM 筆記本，不會自己刪；要刪就在句尾加「分析完刪掉 notebook」 |
 | **寫文獻回顧** `write-review` | 用 write-review 幫我寫文獻回顧，讀者是金融系大三學生 | `screening.md`（每篇相關或不相關＋理由）、`review.md`（每一句都有出處的文獻回顧，參考文獻由程式產生） |
 | **做簡報** `make-slides` | 用 make-slides 把文獻卡做成 8 分鐘的報告 | `slides.pptx`：可以用 PowerPoint 打開修改 |
-| **一次跑完** `lit-pipeline` | 用 lit-pipeline 幫我做選擇權定價的文獻報告 | 依序跑完上面四步 |
+| **一次跑完** `lit-pipeline` | 用 lit-pipeline 幫我做選擇權定價的文獻報告<br>（先把 PDF 放進 `papers`，否則只會有清單和簡報） | 依序跑完上面四步，**中途不會停下來問你**，初篩、分組、簡報主軸都由它決定，做完請事後驗收 |
 
 ### 找你自己領域的期刊
 
