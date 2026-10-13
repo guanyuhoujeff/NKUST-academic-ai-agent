@@ -1,11 +1,11 @@
 ---
 name: fetch-literature
-description: 找學術文獻時使用。向 OpenAlex 查詢指定期刊、指定主題的論文，產出附 DOI 的文獻清單 literature.md。
+description: 找學術文獻時使用。向 OpenAlex 查詢對照表裡的頂刊（或指定期刊）、指定主題的論文，產出附 DOI 的文獻清單 literature.md。
 ---
 
 # 抓文獻
 
-向 OpenAlex（免費公開的學術資料庫）查論文，交出一份每一筆都查得到的文獻清單。
+向 OpenAlex（免費公開的學術資料庫）查論文，交出一份每一筆都查得到的文獻清單。查詢由 `scripts/search.py` 執行：它讀期刊對照表、組網址、寫檔；你負責確認條件、跑程式、照實回報。
 
 ## 步驟
 
@@ -15,28 +15,54 @@ description: 找學術文獻時使用。向 OpenAlex 查詢指定期刊、指定
 1. 用 Shell 工具查環境變數有沒有值。**只看有沒有值，不要把金鑰印出來**（畫面可能正在投影，印出來也會留在對話紀錄裡）：
    - Windows PowerShell：`if ($env:OPENALEX_API_KEY) { "有值" } else { "沒有值" }`
    - macOS／Linux：`[ -n "$OPENALEX_API_KEY" ] && echo 有值 || echo 沒有值`
-2. **有值**：直接用，不用再問。
-3. **沒有值**：停下來請使用者提供金鑰，並附上申請網址 https://openalex.org/settings/api （免費，不用信用卡）。在使用者給金鑰之前不要往下做，也不要用沒有金鑰的網址查詢。
-4. 使用者在對話中給了金鑰之後，**收到金鑰的第一個動作**是用 Shell 工具執行下面這行，把金鑰存起來讓下次不用再問；**做完這行才可以開始查詢**：
-   - macOS／Linux：`echo 'export OPENALEX_API_KEY="金鑰"' >> ~/.bashrc`
-   - Windows：`setx OPENALEX_API_KEY "金鑰"`
+2. **有值**：直接往下做。
+3. **沒有值**：停下來請使用者提供金鑰，並附上申請網址 https://openalex.org/settings/api （免費，不用信用卡）。在使用者給金鑰之前不要往下做。
+4. 使用者在對話中給了金鑰之後，**收到金鑰的第一個動作**是用 Shell 工具把它存進環境變數，**做完才可以開始查詢**：
+   - macOS／Linux：`echo 'export OPENALEX_API_KEY="金鑰"' >> ~/.bashrc`，本次先 `export OPENALEX_API_KEY="金鑰"`
+   - Windows：`setx OPENALEX_API_KEY "金鑰"`，本次先 `$env:OPENALEX_API_KEY="金鑰"`
    然後告訴使用者「金鑰已存入環境變數，重開 OpenCode 後生效；本次先直接用這把金鑰繼續」。
 
 ### 1. 確認三件事
 - **主題關鍵字**：用英文，例如 `option pricing`。OpenAlex 收錄的論文幾乎都是英文，用中文查一定是 0 筆。
   - 使用者給的是英文 → 直接用。
-  - 使用者給的是中文（例如「數位轉型」）→ **這一輪只做翻譯，不查詢**：列出 1–3 個你認為對應的英文學術用語（例如 `digital transformation`），請使用者選一個或自己改，然後結束。中文詞和英文術語常常對不上（例如「漂綠」是 `greenwashing`，不是 `green`），由使用者確認才不會查錯方向。使用者下一個指令給了英文詞，再從步驟 2 往下做。
-- **期刊**：使用者指定的期刊。沒指定就問使用者要查哪一本；不可以不限期刊查（會撈到幾千筆）。
-- **起始年**：使用者沒說就用 2015。
+  - 使用者給的是中文（例如「數位轉型」）→ **這一輪只做翻譯，不查詢**：列出 1–3 個你認為對應的英文學術用語（例如 `digital transformation`），請使用者選一個或自己改，然後結束。中文詞和英文術語常常對不上（例如「漂綠」是 `greenwashing`，不是 `green`），由使用者確認才不會查錯方向。使用者下一個指令給了英文詞，再往下做。
+- **期刊**：使用者指定哪一本就查那一本（用 `--journal`）。使用者說「頂刊」、「頂尖期刊」或沒指定，就查對照表 `references/journals.md` 裡的全部期刊（程式預設）。「頂刊」指的就是這張表，不是要你自己想哪些期刊算頂刊。
+- **起始年**：使用者有說才加 `--from`；沒說就不限。
 
-### 2. 把刊名換成 ISSN
-讀 `.opencode/skills/fetch-literature/references/journals.md`（路徑從工作資料夾算起），找到該期刊的 ISSN。
+### 2. 執行查詢
+用 Shell 工具執行（關鍵字放在引號裡）：
 
-**期刊一律用 ISSN 指定，不可以用刊名搜尋。** 刊名只是一串字，會撞名：在 OpenAlex 用 `journal of finance` 搜刊名會搜到 447 本不同的期刊。ISSN 是國際標準編號，一本期刊一個。
+```
+python .opencode/skills/fetch-literature/scripts/search.py "option pricing"
+python .opencode/skills/fetch-literature/scripts/search.py "greenwashing" --journal "The Journal of Finance" --from 2015
+python .opencode/skills/fetch-literature/scripts/search.py "ESG" --n 30
+```
 
-清單裡沒有這本期刊時，**不可以自己猜 ISSN**，照下面「新增期刊」的步驟查，查到再回來。
+- 程式會寫出工作資料夾的 `literature.md`，並印出：期刊範圍、查到幾筆、列了幾篇。
+- 使用者要更多篇 → 同樣的指令加 `--n 數字`（最多 200），其他條件不要動。
+- **不要自己組 OpenAlex 網址去查**，也不要用 webfetch；期刊範圍、金鑰、網址都由程式處理。
 
-### 新增期刊（清單裡沒有，或使用者要整理一份期刊清單進來）
+### 3. 看程式印出來的結果
+- **查到 N 筆（N > 0）** → 做步驟 4a。
+- **查到 0 筆** → 做步驟 4b。
+- 程式印出錯誤訊息（例如「對照表裡沒有這本」「關鍵字要用英文」「沒有金鑰」）→ 照訊息處理：缺期刊就走「新增期刊」，缺英文詞或金鑰就回到步驟 0 或 1 問使用者。
+
+### 4a. 有結果：檢查後交出
+1. 列出工作資料夾的檔案，確認 `literature.md` 在裡面；讀回來，確認表格列數等於程式說「列了幾篇」。
+2. 確認每一列的 DOI 都以 `https://doi.org/` 開頭、期刊都在對照表裡。
+3. 回覆使用者：查了什麼（關鍵字、期刊範圍、年份）、總共幾筆、列出前幾篇、檔案路徑。程式說「還有 X 篇沒列出」就一併說，使用者要更多就加 `--n`。
+4. 標題、作者、DOI **照檔案原樣**，不可改寫、不可翻譯、不可補上檔案裡沒有的論文。
+
+### 4b. 0 筆：回報並結束
+0 筆通常不是程式錯，是「這些期刊不做這個主題」或「論文用的是別的說法」。這一輪到此結束，回覆使用者三件事：
+
+1. 查了什麼：期刊範圍、英文關鍵字、起始年（沒限就寫不限），結果 0 筆。
+2. 建議一，**換期刊**：對照表裡的期刊是為某個主題挑的，換主題就要換期刊。請使用者提供他領域的期刊（例如國科會學門期刊分級），照「新增期刊」加進來再查。
+3. 建議二，**換說法**：提出 2–3 個英文同義詞（例如 digital transformation → digitalization、fintech）。
+
+要不要換、換哪個，由使用者的下一個指令決定；這一輪不要自己換了再查，也不要自己加期刊。
+
+### 新增期刊（對照表裡沒有，或使用者要整理一份期刊清單進來）
 1. 對每一本期刊執行：
    ```
    python .opencode/skills/fetch-literature/scripts/journal.py lookup "刊名"
@@ -48,57 +74,21 @@ description: 找學術文獻時使用。向 OpenAlex 查詢指定期刊、指定
    - 使用者給了期刊分級清單（例如國科會「財金及會計學門」期刊分級報告），就照清單寫，例如 `"國科會 A+"`、`"國科會 A Tier-1"`。
    - 沒有可靠出處就寫 `"未查"`。**不可以自己判斷期刊好不好。**
 4. 一次整理很多本時，做完列一張表回報：哪幾本加進去了、哪幾本等使用者選、哪幾本查不到。
+5. 想看對照表現在有哪些期刊：`python .opencode/skills/fetch-literature/scripts/journal.py issns`。
 
-### 3. 組出查詢網址
-把前面確認的條件照這個樣板填入。金鑰的地方**照抄 `$OPENALEX_API_KEY`**（Windows 寫 `$env:OPENALEX_API_KEY`），執行時 shell 會自己代入，你從頭到尾不需要知道金鑰是什麼：
+## 程式在做什麼（給想看懂的人）
+`search.py` 送出的網址長這樣（金鑰由程式從環境變數帶入）：
 
 ```
-https://api.openalex.org/works?filter=primary_location.source.issn:【ISSN】,primary_location.source.is_core:true,title_and_abstract.search:%22【關鍵字】%22,from_publication_date:【起始年】-01-01&sort=cited_by_count:desc&per-page=10&select=doi,title,publication_year,cited_by_count,authorships,primary_location&api_key=$OPENALEX_API_KEY
+https://api.openalex.org/works?filter=primary_location.source.issn:【對照表的 ISSN，多本用|接】,primary_location.source.is_core:true,title_and_abstract.search:%22【關鍵字】%22[,from_publication_date:【起始年】-01-01]&sort=cited_by_count:desc&per-page=【篇數】
 ```
 
-- 關鍵字裡的空白要換成 `%20`，例如 `option%20pricing`。
-- `is_core:true` 只留核心期刊，用來排除冒名期刊。
-- `title_and_abstract.search` 只比對標題與摘要。不要改成 `default.search`，那會連全文一起比對，撈進一堆不相關的論文。
-
-### 4. 送出查詢
-用 Shell 工具執行 curl，網址用雙引號包起來：
-- macOS／Linux：`curl -s "網址"`
-- Windows PowerShell：`curl.exe -s "網址"`（要寫 `curl.exe`，PowerShell 的 `curl` 是另一個指令）
-
-不要用 webfetch 工具：它讀不到環境變數，你就得把金鑰貼進網址，金鑰會留在對話紀錄裡。
-
-回傳的 `meta.count` 是符合條件的總筆數，`results` 是論文清單。看 `meta.count` 決定下一步：
-- 不是 0 → 做步驟 5a。
-- 是 0 → 做步驟 5b，不做 5a。
-
-### 5a. 有結果：寫成 literature.md
-在工作資料夾寫出 `literature.md`（用相對路徑 `literature.md`，**不可以寫到 `/tmp` 或其他資料夾**），內容：
-
-1. 標題與一行查詢條件（主題、期刊與 ISSN、起始年、總筆數、查詢日期）。
-2. 一張表格，每篇論文一列，欄位依序為：年份｜作者｜標題｜期刊｜被引數｜DOI。
-   - 作者取 `authorships` 裡每個人的 `author.display_name`，超過三位就寫前三位加「等」。
-   - 標題、作者、DOI **照回傳內容原樣抄寫**，不可改寫、不可翻譯、不可補上回傳內容裡沒有的論文。
-3. 表格下方附上實際送出的查詢網址（網址裡的金鑰就保持 `$OPENALEX_API_KEY` 的寫法）。
-
-### 5b. 0 筆：回報並結束
-0 筆通常不是程式錯，是「這本期刊不做這個主題」或「論文用的是別的說法」。這一輪到此結束，不寫 `literature.md`，回覆使用者三件事：
-
-1. 查了什麼：期刊、英文關鍵字、起始年，結果 0 筆。
-2. 建議一，**換期刊**：對照表裡的期刊是為某個主題挑的，換主題就要換期刊。請使用者提供他領域的期刊（例如國科會學門期刊分級），照「新增期刊」加進來再查。
-3. 建議二，**換說法**：提出 2–3 個英文同義詞（例如 digital transformation → digitalization、fintech）。
-
-要不要換、換哪個，由使用者的下一個指令決定；這一輪不要自己換了再查。
-
-## 檢查（走 5a 時，交出去之前一定要做）
-
-1. 列出工作資料夾的檔案，確認 `literature.md` 就在裡面；再讀回來，確認表格列數等於回傳的論文數。
-2. 確認每一列的 DOI 都以 `https://doi.org/` 開頭。
-3. 確認每一列的期刊都是使用者指定的那一本。
-4. 確認檔案裡沒有出現金鑰。
-5. 如果金鑰是使用者這次在對話中提供的，確認已經照步驟 0 寫進環境變數；還沒寫就現在補寫。
+- 期刊一律用 ISSN 指定，不用刊名：刊名會撞名（OpenAlex 用 `journal of finance` 搜刊名會搜到 447 本）。
+- `is_core:true` 只留核心期刊，排除冒名期刊。
+- `title_and_abstract.search` 只比對標題與摘要，不比全文，免得撈進一堆不相關的論文。
 
 ## 失敗怎麼辦
-
-- 回傳 `429` 或提到 budget：今天的額度用完了，停下來告訴使用者。
-- 回傳其他錯誤：檢查網址有沒有照樣板、空白有沒有換成 `%20`，修正後重試，最多 3 次。
-- 任何一項檢查沒過：修正 `literature.md` 後重新檢查。
+- 程式說 `429` 或額度用完：停下來告訴使用者。
+- 程式說「對照表裡沒有這本」：走「新增期刊」，不可以自己猜 ISSN、不可以自己組網址繞過去。
+- 程式其他錯誤：看訊息修正指令再跑，最多 3 次；還是不行就把錯誤訊息貼給使用者。
+- 檢查沒過（檔案不在、列數不對）：重跑一次程式再檢查。

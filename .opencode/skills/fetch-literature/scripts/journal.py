@@ -4,6 +4,7 @@
   python journal.py lookup "刊名"            到 OpenAlex 查候選期刊（同名的會一起列出來）
   python journal.py add ISSN "等級"          用 ISSN 再查一次確認，寫進 references/journals.md
                                               等級寫清楚來源，例如「國科會 A+」「ABDC A」；不知道就寫「未查」
+  python journal.py issns                   列出對照表全部期刊，並印出可直接貼進查詢網址的 ISSN 串（用 | 接）
 金鑰：有環境變數 OPENALEX_API_KEY 就帶上（沒帶也能查，但和同網路的人共用很小的額度）。
 """
 import datetime, json, os, pathlib, re, sys, urllib.parse, urllib.request
@@ -82,9 +83,16 @@ def cmd_add(args):
     print(f"已加入對照表：{s['display_name']}｜{s['issn_l']}｜{grade}｜{s.get('host_organization_name')}")
     print("告訴使用者加了哪一本，並請他打開 references/journals.md 看一眼。")
 
+def cmd_issns(args):
+    """查「頂刊」＝對照表全部期刊時用：ISSN 由程式讀表，AI 不用自己挑期刊、不用自己抄"""
+    rs = [[c.strip() for c in r.split("|")] for r in rows()]
+    if not rs: sys.exit("對照表是空的，請先用 lookup / add 加期刊")
+    for c in rs: print(f"  {c[1]}｜{c[2]}｜{c[3]}")
+    print(f"\n共 {len(rs)} 本。查詢網址的 issn: 後面照貼這一串：\n{'|'.join(c[2] for c in rs)}")
+
 def main():
     a = sys.argv[1:]
-    table = {"lookup": cmd_lookup, "add": cmd_add}
+    table = {"lookup": cmd_lookup, "add": cmd_add, "issns": cmd_issns}
     if not a or a[0] not in table: print(__doc__); sys.exit(1)
     table[a[0]](a[1:])
 
