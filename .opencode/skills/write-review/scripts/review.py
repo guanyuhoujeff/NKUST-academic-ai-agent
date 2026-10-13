@@ -122,7 +122,7 @@ def apa_line(text):
 
 # ---------- 引用 ----------
 CITE = re.compile(r"[（(]([^（）()]*?(?:19|20)\d\d[^（）()]*?)[）)]")
-ONE = re.compile(r"^\s*(?P<who>[^,，;；]+?)\s*[,，]\s*(?P<year>(?:19|20)\d\d)[a-z]?\s*[,，]\s*"
+ONE = re.compile(r"^\s*(?P<who>[^,，;；]+?)\s*[,，]\s*(?P<year>(?:19|20)\d\d)[a-z]?\s*[,，:：]?\s*"
                  r"(?:第\s*(?P<p1>[\d\s,，、–\-~～至到]+?)\s*頁|pp?\.\s*(?P<p2>[\d\s,–\-]+)|(?P<sec>[^,，;；（）()]{2,40}?)\s*節)\s*$")
 
 def parse_cites(sentence):
