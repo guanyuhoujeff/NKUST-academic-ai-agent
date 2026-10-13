@@ -13,3 +13,5 @@
 | Journal of Futures Markets | 0270-7314 | ABDC A | Wiley | 2026-09-30 |
 | Mathematical Finance | 0960-1627 | ABDC A | Wiley | 2026-09-30 |
 | Review of Derivatives Research | 1380-6645 | ABDC B | Springer Science+Business Media | 2026-09-30 |
+| Journal of Banking and Finance | 0378-4266 | 國科會 A Tier-1 | Elsevier | 2026-10-13 |
+| Journal of Corporate Finance | 0929-1199 | 國科會 A Tier-1 | Elsevier | 2026-10-13 |
