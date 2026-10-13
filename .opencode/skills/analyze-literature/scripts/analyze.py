@@ -5,7 +5,13 @@
   python analyze.py papers/某篇.pdf --prompt references/did_prompt.md # 用其他 prompt → notes/某篇.did.md
 同一篇 PDF 第二次分析時沿用第一次建立的 notebook（記在 notes/某篇.json），不重新上傳。
 """
-import json, subprocess, sys, datetime, pathlib, argparse, importlib.util, shutil
+import json, os, subprocess, sys, datetime, pathlib, argparse, importlib.util, shutil
+
+for _s in (sys.stdout, sys.stderr):   # Windows 的主控台是 cp950，不改成 UTF-8 會當掉或變亂碼
+    try: _s.reconfigure(encoding="utf-8", errors="replace")
+    except Exception: pass
+# nlm 是 Python 程式，叫它一律用 UTF-8 輸出；這邊也一律用 UTF-8 讀，不靠系統預設編碼（Windows 是 cp950，讀到中文會炸）
+ENV = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
 
 HERE = pathlib.Path(__file__).resolve().parent
 # 優先用「跑這支程式的 Python」裡裝的 nlm（不依賴 PATH）；沒有的話退回 PATH 上的 nlm
@@ -17,10 +23,10 @@ else:
     sys.exit("找不到 nlm。請先安裝：python -m pip install --user notebooklm-mcp-cli")
 
 def nlm(*args, timeout=600, cleanup=None):
-    r = subprocess.run([*NLM, *args], capture_output=True, text=True, timeout=timeout)
+    r = subprocess.run([*NLM, *args], capture_output=True, text=True, encoding="utf-8", errors="replace", env=ENV, timeout=timeout)
     if r.returncode != 0:
         if cleanup:   # 上傳失敗時，把剛建立的空 notebook 刪掉，不留垃圾
-            subprocess.run([*NLM, "notebook", "delete", cleanup, "--confirm"], capture_output=True, text=True, timeout=120)
+            subprocess.run([*NLM, "notebook", "delete", cleanup, "--confirm"], capture_output=True, text=True, encoding="utf-8", errors="replace", env=ENV, timeout=120)
         sys.exit(f"nlm {' '.join(args[:3])} 失敗：{(r.stderr or r.stdout).strip()[:500]}")
     return r.stdout
 
