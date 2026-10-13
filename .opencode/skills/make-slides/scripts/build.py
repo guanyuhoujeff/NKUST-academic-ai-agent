@@ -29,6 +29,7 @@ LATIN = "Arial"
 MAX_BULLETS, MAX_CHARS, MAX_SAME_LAYOUT = 5, 45, 3
 MAX_SECTIONS = 2   # 章節頁最多連續 2 頁（例如「小結」接「Q&A」）
 LAYOUTS = ("section", "assertion", "bignumber", "table", "compare", "quote")
+FORM_WORDS = ("要點", "表格", "大數字", "對照", "引言", "只有標題", "標題")   # outline「建議內容」欄至少要說出這頁的形式
 # 只由這些詞組成的標題等於沒說話（例：「研究背景與目的」「結論與未來方向」）
 GENERIC = re.compile(r"^(研究|本文|文獻|主要|相關|整體|簡報)*(歡迎|議程|簡報|背景|目的|目標|動機|範圍|方法|設計|資料|結果|發現|結論|建議|限制|摘要|概覽|概述|總覽|簡介|介紹|回顧|討論|趨勢|未來方向|展望|與|及|和|、|：|\s)+$")
 
@@ -406,24 +407,29 @@ def main():
         sys.exit(f"BUILD FAILED: 讀不了 {src}：{e}")
     err = validate(deck)
     if err: sys.exit(f"BUILD FAILED: {err}")
-    prs, th = build(deck, out); base = src.resolve().parent; fail = False
-    print(f"BUILD OK: {out}（{len(prs.slides)} 頁，含封面；風格 {th['name']}；中文字型 {EA}）")
+    prs, th = build(deck, out); base = src.resolve().parent; lines = []
     total, bad = check_fonts(prs)
-    print(f"[字型] {total} 段文字，{total - bad} 段有東亞字型" + ("" if not bad else f" ← {bad} 段沒有，中文會跑版"))
-    miss = check_outline(deck, base); fail |= bool(miss)
-    print("[大綱] " + ("通過：每一頁的標題都出自 outline.md" if not miss else "；".join(miss)))
+    lines.append((not bad, f"[字型] {total} 段文字，{total - bad} 段有東亞字型" + ("" if not bad else f" ← {bad} 段沒有，中文會跑版")))
+    miss = check_outline(deck, base)
+    lines.append((not miss, "[大綱] " + ("通過：每一頁的標題都出自 outline.md" if not miss else "；".join(miss))))
     warn = check_size(deck)
-    print("[份量] " + ("通過" if not warn else "；".join(warn)))
-    zh = check_language(deck); fail |= bool(zh)
-    print("[語言] " + ("通過：沒有簡體字" if not zh else "有簡體字，請改成繁體：" + "；".join(f"{w}「{c}」" for w, c in zh)))
+    lines.append((not warn, "[份量] " + ("通過" if not warn else "；".join(warn))))
+    zh = check_language(deck)
+    lines.append((not zh, "[語言] " + ("通過：沒有簡體字" if not zh else "有簡體字，請改成繁體：" + "；".join(f"{w}「{c}」" for w, c in zh))))
     missing, err = check_sources(deck, base)
     if err:
-        print("[來源] " + err); fail = True
+        lines.append((False, "[來源] " + err))
     elif missing:
-        print(f"[來源] 有 {len(missing)} 項在來源檔裡找不到：{'、'.join(missing)}")
-        print("       → 回來源檔確認；是寫錯就改 deck.json，是自己加的就刪掉，然後重跑。"); fail = True
+        lines.append((False, f"[來源] 有 {len(missing)} 項在來源檔裡找不到：{'、'.join(missing)}\n       → 回來源檔確認；是寫錯就改 deck.json，是自己加的就刪掉，然後重跑。"))
     else:
-        print("[來源] 通過：投影片裡的數字、DOI、ISSN 都能在來源檔找到")
+        lines.append((True, "[來源] 通過：投影片裡的數字、DOI、ISSN 都能在來源檔找到"))
+    fail = not all(ok for ok, _ in lines)
+    # 先算完五項檢查再印標題行：有一項沒過就不印 BUILD OK，免得模型看到第一行就跟使用者說做好了
+    if fail:
+        print(f"BUILD 未通過：{sum(not ok for ok, _ in lines)} 項檢查沒過（{out} 雖然已產生，還不能交給使用者；修好 deck.json 重跑，不可以回報「完成」）")
+    else:
+        print(f"BUILD OK: {out}（{len(prs.slides)} 頁，含封面；風格 {th['name']}；中文字型 {EA}）")
+    for _, l in lines: print(l)
     if "--pdf" in sys.argv:
         exe = shutil.which("soffice") or shutil.which("libreoffice")
         if exe:

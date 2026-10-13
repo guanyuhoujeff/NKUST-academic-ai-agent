@@ -2,11 +2,13 @@
 """做簡報的流程管家：告訴你現在該做哪一步，並守住每一關。
 用法（都在工作資料夾執行）:
   python slides.py next                 現在該做什麼？（每一輪對話的第一個動作）
+  python slides.py setup "聽眾：…；時間：N 分鐘；方向：…"
+                                        問完聽眾、時間、方向之後執行（使用者在指令裡講過的就不用再問）
   python slides.py angle "選定的主軸"    使用者選好主軸（講法）之後執行
   python slides.py check-outline        檢查 outline.md
-  python slides.py approve              使用者同意大綱之後執行
-  python slides.py theme <代號> [--page-by-page]
-                                        使用者選好風格之後執行；他說要一頁一頁討論才加 --page-by-page
+  python slides.py approve [--page-by-page]
+                                        使用者同意大綱之後執行；他明說要一頁一頁討論才加 --page-by-page
+  python slides.py theme <代號>          使用者選好風格之後執行
   python slides.py page-ok              （逐頁模式）使用者同意目前這一頁之後執行
   python slides.py pages-off            （逐頁模式）使用者說「剩下的你直接做完」時執行
   python slides.py build                產生 slides.pptx 並檢查
@@ -27,13 +29,15 @@ import build as B
 
 ME = "python .opencode/skills/make-slides/scripts/slides.py"
 STATE, OUTLINE, DECK = pathlib.Path(".slides-state.json"), pathlib.Path("outline.md"), pathlib.Path("deck.json")
-ORDER = ["start", "angled", "checked", "approved", "themed", "built"]
+ORDER = ["start", "setup", "angled", "checked", "approved", "themed", "built"]
+KEEP = ("angle", "auto", "sources", "audience", "minutes", "direction", "theme", "page_mode")   # 退回前一關時仍要留著的紀錄
+
+def base(st): return {k: st[k] for k in KEEP if k in st}
 
 def load():
     st = json.loads(STATE.read_text(encoding="utf-8")) if STATE.exists() else {"stage": "start"}
     if OUTLINE.exists() and st.get("outline_hash") and st["outline_hash"] != digest():
-        st = {"stage": "angled", "angle": st.get("angle", ""), "auto": st.get("auto", False), "sources": st.get("sources"),
-              "note": "outline.md 改過了，要重新檢查、重新給使用者確認"}
+        st = {"stage": "angled", **base(st), "note": "outline.md 改過了，要重新檢查、重新給使用者確認"}
     return st
 
 
@@ -96,8 +100,14 @@ def parse_outline():
     for ln in txt.splitlines():
         c = [x.strip() for x in ln.strip().strip("|").split("|")]
         if ln.strip().startswith("|") and len(c) >= 4 and c[0].isdigit():
-            rows.append(dict(n=int(c[0]), layout=c[1].strip("` "), title=c[2].strip("* "), evidence=" | ".join(c[3:])))
+            rows.append(dict(n=int(c[0]), layout=c[1].strip("` "), title=c[2].strip("* "), evidence=c[3],
+                             suggest=" ".join(c[4:]).strip("—- ")))
     return txt, rows
+
+def page_bounds(st):
+    """大約一分鐘一頁：N 分鐘的簡報，頁數要在 N/2 到 N+2 之間（最少 3 頁）。"""
+    m = int(st.get("minutes") or 10)
+    return max(3, m // 2), m + 2
 
 def simplified_in(text):
     """回傳 text 裡的簡體字（去重、照出現順序）；用 build.py 的同一份字表。"""
@@ -106,16 +116,27 @@ def simplified_in(text):
         if ch in B.SIMPLIFIED and ch not in seen: seen.append(ch)
     return seen
 
-def check_outline():
+def check_outline(st):
     if not OUTLINE.exists():
         return ["找不到 outline.md"], []
     txt, rows = parse_outline(); bad = []
     for key in ("聽眾", "時間", "一句話"):
         if not re.search(key + r"[^\n：:]*[：:]\s*\S", txt):
             bad.append(f"開頭少了「{key}」那一行（格式：- {key}：內容）")
+    if st.get("audience") and not st.get("auto"):
+        m = re.search(r"聽眾[^\n：:]*[：:]\s*(.+)", txt)
+        if m and norm(st["audience"]) not in norm(m.group(1)):
+            bad.append(f"「聽眾」那一行要照使用者說的寫：{st['audience']}（現在寫的是「{m.group(1).strip()}」）")
+    if st.get("minutes"):
+        m = re.search(r"時間[^\n：:]*[：:]\s*(\d+)", txt)
+        if m and int(m.group(1)) != int(st["minutes"]):
+            bad.append(f"「時間」那一行要寫使用者說的 {st['minutes']} 分鐘（現在寫 {m.group(1)}）")
     if len(rows) < 3:
-        bad.append("大綱表少於 3 頁，或表格格式不對（每列要是：| 頁碼 | 版面 | 標題 | 證據 |）")
+        bad.append("大綱表少於 3 頁，或表格格式不對（每列要是：| 頁碼 | 版面 | 標題 | 證據 | 建議內容 |）")
         return bad, rows
+    lo, hi = page_bounds(st)
+    if not lo <= len(rows) <= hi:
+        bad.append(f"使用者要講 {st.get('minutes') or 10} 分鐘，大約一分鐘一頁，大綱應該在 {lo} 到 {hi} 頁之間，現在是 {len(rows)} 頁")
     raw = "\n".join(p.read_text(encoding="utf-8", errors="replace") for p in sources())
     blob = norm(raw)
     run, prev = 0, None
@@ -139,7 +160,10 @@ def check_outline():
             bad.append(f"{tag}標題裡的 {'、'.join(sorted(ghost))} 在來源檔裡找不到。標題的數字要和來源一模一樣，不可以自己估或換算")
         if r["layout"] == "section":
             continue
-        quotes = [q for q in re.findall(r"「([^」]{4,})」", r["evidence"])]
+        if len(r["suggest"]) < 6 or not any(w in r["suggest"] for w in B.FORM_WORDS):
+            bad.append(f"{tag}的「建議內容」要說清楚這頁放什麼形式（{'／'.join(B.FORM_WORDS)}）和用哪些材料，"
+                       f"例如「三條要點：資料期間、模型名稱、加速倍數」，不要只寫「說明…」「強調…」（現在寫的是「{r['suggest'][:30]}」）")
+        quotes = [q for q in re.findall(r"「([^」]{4,})」|『([^』]{4,})』|“([^”]{4,})”|\"([^\"]{4,})\"", r["evidence"]) for q in q if q]   # 「」為主，也認 『』“”""
         if not quotes:
             bad.append(f"{tag}的證據欄沒有引文。請從來源檔原樣抄一句，用「」括起來")
         elif max(len(q) for q in quotes) > 60:
@@ -152,19 +176,39 @@ def check_outline():
         bad.append("整份只用了不到 3 種版面，請依內容換用 bignumber / table / compare / quote")
     return bad, rows
 
+SETUP_HOWTO = """## 現在要做的事：確認三件事（聽眾、時間、方向），還不讀來源
+
+來源檔有這些（現在先不要讀）：
+{files}
+
+先看使用者到目前為止說過的話裡，有沒有這三件：
+1. 聽眾是誰？（例如：金融系大三學生、沒讀過這些論文）
+2. 講幾分鐘？（大約一分鐘一頁）
+3. 題目或方向有沒有想好？（他說「還沒想好」「你提」也算有答）
+
+然後二選一：
+- 三件都有了 → 【現在就用工具執行】這一行，不要回覆使用者、不要結束這一輪（把指令寫在回覆裡給他看不算執行）：
+  {me} setup "聽眾：…；時間：N 分鐘；方向：…"
+  （聽眾、方向照他的原話寫，不要改寫；時間寫數字；方向沒想好就寫「沒有」。執行後它會接著告訴你怎麼讀來源、怎麼提主軸，同一輪就做完。）
+- 有缺 → 只問缺的那幾件，一次問完，然後【這一輪到此結束】等他回覆。他回覆之後，下一輪的第一個動作就是執行上面那行 setup。
+
+這一輪不要讀來源檔、不要提主軸、不要寫 outline.md。
+"""
+
 ANGLE_HOWTO = """## 現在要做的事：和使用者談主軸（這份簡報要怎麼講）
+
+使用者的設定：聽眾＝{audience}；時間＝{minutes} 分鐘；方向＝{direction}
 
 1. 用讀檔工具把下面每個來源檔【從頭讀到尾】（只搜尋關鍵字不算）：
 {files}
    各檔的章節與重點行如下（這只是目錄，細節要讀原文）：
 {digest}
-2. 使用者還沒講的就問：聽眾是誰、講多久。已經講過的不用再問。
-3. 根據來源，向使用者提出【2 到 3 個不同的主軸】讓他挑。每個主軸寫三行：
-   - 一句話：聽眾聽完要記住什麼（使用者已經給了那一句話，就提 2–3 種不同的講法來撐它）
+2. 根據來源，向使用者提出【2 到 3 個不同的主軸】讓他挑（他有說方向，主軸就要順著他的方向）。每個主軸寫三行：
+   - 一句話：聽眾聽完要記住什麼
    - 怎麼講：大概的順序，例如「先講痛點 → 再講數字 → 最後講應用」
    - 會用到：來源裡的哪些材料
    主軸之間要真的不一樣（例如一個從速度切入、一個從應用切入），不要只是換句話說。
-4. 問使用者：選哪一個？或是他有自己的想法？然後【這一輪到此結束】，等他回覆。不要寫 outline.md。
+3. 問使用者：選哪一個？或是他有自己的想法？然後【這一輪到此結束】，等他回覆。不要寫 outline.md。
 
 使用者選好之後執行（把他選的主軸用一兩句話寫進引號裡）：
 {me} angle "一句話：…；講法：…"
@@ -177,22 +221,23 @@ OUTLINE_HOWTO = """## 現在要做的事：寫大綱 outline.md
 1. 來源檔在這裡，寫大綱時要回去查原文：
 {files}
 2. 照使用者選的主軸安排每一頁，不要自己換成別的講法。
-3. 在工作資料夾寫出檔案 outline.md，格式照抄這個樣子：
+3. 在工作資料夾寫出檔案 outline.md，格式照抄這個樣子（聽眾、時間兩行照使用者說的寫，不要改寫）：
 
 # 簡報大綱
 
-- 聽眾：（誰、已經知道什麼）
-- 時間：（幾分鐘）
+- 聽眾：{audience}
+- 時間：{minutes} 分鐘
 - 要對方記住的一句話：（一句）
 - 風格：（先留空）
 
-| 頁 | 版面 | 標題（一句結論） | 證據（從來源原樣抄一句，用「」括起來，後面註明哪個檔） |
-|---|---|---|---|
-| 1 | section | 開場的一句話 | — |
-| 2 | bignumber | 這一頁的結論句 | 「從來源檔原樣抄的一句話」（某某.md） |
+| 頁 | 版面 | 標題（一句結論） | 證據（從來源原樣抄一句，用「」括起來，後面註明哪個檔） | 建議內容（這頁放什麼） |
+|---|---|---|---|---|
+| 1 | section | 開場的一句話 | — | 只有標題 |
+| 2 | bignumber | 這一頁的結論句 | 「從來源檔原樣抄的一句話」（某某.md） | 大數字放 16,000 倍，下面兩條要點：資料期間、方法名稱 |
 
 規則：
-- 大約一分鐘一頁。
+- 大約一分鐘一頁：{minutes} 分鐘就是 {lo} 到 {hi} 頁。
+- 「建議內容」欄用一句話告訴使用者這一頁會放什麼形式（幾條要點／一個表格／一個大數字／兩欄對照／一句引言／只有標題）和用來源裡的哪些材料，例如「三條要點：資料期間、模型名稱、加速倍數」。只寫「說明…」「強調…」會被擋下來。使用者看這一欄決定要不要改。
 - 版面只能用：section（換段落／開場／結尾）、assertion（結論＋證據）、bignumber（一個大數字）、table（多筆並排）、compare（兩欄對照）、quote（引言）。至少用三種，同一種不要連續超過 3 頁。
 - 標題是一句結論，不是主題。「深度學習簡介」是主題；「神經網路把定價從幾十萬微秒縮短到幾十微秒」是結論。
 - 除了 section 以外，每一頁的證據欄都要有一句從來源檔【原樣抄下來】的話（60 字以內），用「」括起來。程式會去來源檔裡找這句話，找不到就不會過。\n- 標題要是那句引文撐得起來的結論。標題裡的數字必須和來源一模一樣，不可以自己估算（來源寫 0.5% 就不能寫成「近 30%」）。
@@ -201,22 +246,20 @@ OUTLINE_HOWTO = """## 現在要做的事：寫大綱 outline.md
 4. 寫完後執行：{me} check-outline
 """
 
-THEMES_TEXT = """## 現在要做的事：請使用者選風格，並問他要不要逐頁討論
+THEMES_TEXT = """## 現在要做的事：請使用者選風格
 
-一次問這兩件事，然後【這一輪到此結束】，等他回覆。
+製作方式已經記錄：{mode}。
 
-（一）風格：把下面三套介紹給使用者，依他的聽眾與場合【推薦一個並說明理由】，請他選。
+把下面三套介紹給使用者，依他的聽眾與場合【推薦一個並說明理由】，請他選，然後【這一輪到此結束】等他回覆。
 - academic 學術簡潔：白底、深藍標題、一道紅色短線。安靜、不搶內容。適合課堂報告、口試。
 - editorial 編輯雜誌：米色底、黑色大標題、左側磚紅色直條。像財經雜誌內頁。適合讀書會分享。
 - stage 深色講台：深藍黑底、白字、琥珀色強調，字最大。適合大教室、投影機偏暗。
 
-（二）製作方式：問他「每一頁的內容要不要一頁一頁跟你確認？還是我整份做好再給你看？」
-- 預設是整份做好再給他看。使用者沒有明確說要逐頁，就不要逐頁。
-
-使用者回覆之後執行其中一行（代號只能是 academic、editorial、stage）：
-- 整份做好再給他看（預設）：{me} theme <代號>
-- 他明確說要一頁一頁討論：{me} theme <代號> --page-by-page
+使用者選好之後執行（代號只能是 academic、editorial、stage）：{me} theme <代號>
 """
+
+def themes_text(st):
+    return THEMES_TEXT.format(me=ME, mode="一頁一頁和使用者討論" if st.get("page_mode") else "整份做好再給使用者看")
 
 PAGE_HOWTO = """## 現在要做的事：和使用者討論第 {i} 頁（共 {n} 頁）
 
@@ -281,6 +324,15 @@ def src_list(): return ", ".join(f'"{p}"' for p in sources())
 def deck_howto(st):
     return DECK_HOWTO.format(theme=st["theme"], srcs=src_list(), me=ME, icons=" / ".join(B.ICONS))
 
+def angle_howto(st):
+    return ANGLE_HOWTO.format(files=file_list(), me=ME, digest=digest_sources(), audience=st.get("audience") or "（使用者交給你決定）",
+                              minutes=st.get("minutes") or 10, direction=st.get("direction") or "沒有")
+
+def outline_howto(st):
+    lo, hi = page_bounds(st)
+    return OUTLINE_HOWTO.format(files=file_list(), me=ME, angle=st.get("angle") or "（由你決定）", lo=lo, hi=hi,
+                                audience=st.get("audience") or "（使用者交給你決定：寫出誰、已經知道什麼）", minutes=st.get("minutes") or 10)
+
 def page_howto(st):
     _, rows = parse_outline(); i = st["page"]; r = rows[i - 1]
     head = ""
@@ -304,19 +356,21 @@ def cmd_next(st):
     if not sources():
         print("找不到任何來源檔（literature.md、notes/*.md、sources/*.md 都沒有）。停下來告訴使用者：請先用 fetch-literature 產出 literature.md、用 analyze-literature 產出 notes/，或把自己的 .md 放進 sources/，放好之後再叫你繼續。"
               "\n不要自己建立來源檔。"); return
+    if not at_least(st, "setup"):
+        print(SETUP_HOWTO.format(files=file_list(), me=ME)); return
     if not at_least(st, "angled"):
-        print(ANGLE_HOWTO.format(files=file_list(), me=ME, digest=digest_sources())); return
+        print(angle_howto(st)); return
     if not OUTLINE.exists():
-        print(OUTLINE_HOWTO.format(files=file_list(), me=ME, angle=st.get("angle") or "（由你決定）")); return
+        print(outline_howto(st)); return
     if not at_least(st, "checked"):
         print(f"outline.md 已經有了，但還沒通過檢查。執行：{ME} check-outline"); return
     if not at_least(st, "approved"):
         print("大綱已通過檢查，正在等使用者確認。\n"
-              "- 使用者還沒看過 → 把 outline.md 的大綱表原樣貼給他，問他要不要改，然後【這一輪到此結束】。\n"
-              f"- 使用者已經說可以 → 現在就執行：{ME} approve（它會告訴你下一步）\n"
+              "- 使用者還沒看過 → 把 outline.md 的大綱表（含建議內容欄）原樣貼給他，問他要不要改、要逐頁確認還是整份做好再看，然後【這一輪到此結束】。\n"
+              f"- 使用者已經說可以 → 現在就執行：{ME} approve（他明說要一頁一頁討論才加 --page-by-page）\n"
               "- 使用者要改 → 照他說的改 outline.md，再執行 check-outline，通過後再貼給他看一次。"); return
     if not at_least(st, "themed"):
-        print(THEMES_TEXT.format(me=ME)); return
+        print(themes_text(st)); return
     if not at_least(st, "built"):
         print(page_howto(st) if st.get("page_mode") else deck_howto(st)); return
     print("簡報已經做好並通過檢查。把上一次 build 印出的檢查結果原樣貼給使用者，列出每頁的版面與標題。\n"
@@ -328,44 +382,69 @@ def cmd_sources_ok(st):
     st["sources"] = manifest(); save(st)
     print("已記錄：使用者確認這些是他放的來源檔：" + "、".join(u) + f"\n接著執行：{ME} next")
 
+def cmd_setup(st, text):
+    aud = re.search(r"聽眾[：:]\s*([^；;]+)", text)
+    mins = re.search(r"時間[：:]\s*(\d+)", text)
+    dirn = re.search(r"方向[：:]\s*(.*)", text)
+    if not (aud and mins and dirn):
+        sys.exit(f'要把三件事都寫進引號裡，例如：{ME} setup "聽眾：金融系大三學生；時間：8 分鐘；方向：沒有"\n'
+                 "（聽眾或時間使用者還沒說，先問他，這一輪到此結束；不要自己猜。方向他沒想好就寫「沒有」，不用再問。）")
+    direction = dirn.group(1).strip().rstrip("；; ") or "沒有"
+    if re.fullmatch(r"(還?沒(有)?(想好|決定|定)?|無|不知道|你提|你決定|交給你)[。！!]?", direction): direction = "沒有"
+    if (sc := simplified_in(text)):
+        sys.exit(f"設定裡有簡體字：{'、'.join(sc)}。改成台灣繁體中文再執行一次 setup")
+    if not 1 <= int(mins.group(1)) <= 120:
+        sys.exit("時間要在 1 到 120 分鐘之間")
+    if at_least(st, "checked"):
+        print("注意：大綱已經寫好了。改設定之後，outline.md 要重新檢查、重新給使用者確認。")
+    new = {"stage": "setup", **base(st), "audience": aud.group(1).strip(), "minutes": int(mins.group(1)), "direction": direction}
+    new.pop("angle", None); save(new)
+    print(f"已記錄：聽眾＝{new['audience']}；時間＝{new['minutes']} 分鐘；方向＝{new['direction']}\n")
+    print("【不要停下來】這一輪就接著做下面的事：讀來源檔 → 提 2 到 3 個主軸給使用者挑。\n")
+    print(angle_howto(new))
+
 def cmd_angle(st, text):
-    if not text.strip():
-        sys.exit(f'要把使用者選的主軸寫進引號裡，例如：{ME} angle "一句話：…；講法：…"')
+    if not at_least(st, "setup"):
+        sys.exit(f"還不能談主軸：還沒問清楚聽眾、時間、方向。執行：{ME} next")
+    if len(re.sub(r"[\W\d_]", "", text)) < 10:
+        sys.exit(f'要把使用者選的主軸【用一兩句話】寫進引號裡（不能只寫編號），例如：{ME} angle "一句話：…；講法：…"')
     if (sc := simplified_in(text)):
         sys.exit(f"主軸裡有簡體字：{'、'.join(sc)}。改成台灣繁體中文再執行一次 angle")
     if at_least(st, "checked"):
         print("注意：大綱已經寫好了。改主軸之後，outline.md 要照新的主軸重寫並重新檢查。")
-    save({"stage": "angled", "angle": text.strip(), "auto": st.get("auto", False), "sources": st.get("sources")})
+    new = {"stage": "angled", **base(st), "angle": text.strip()}; save(new)
     print(f"已記錄主軸：{text.strip()}\n")
     print("【不要停下來】這一輪就接著做下面的事：寫 outline.md → 執行 check-outline → 把大綱貼給使用者。\n")
-    print(OUTLINE_HOWTO.format(files=file_list(), me=ME, angle=text.strip()))
+    print(outline_howto(new))
 
 def cmd_check(st):
     warn_unknown()
     if not at_least(st, "angled"):
         sys.exit(f"還不能檢查大綱：還沒和使用者談定主軸。執行：{ME} next")
-    bad, rows = check_outline()
+    bad, rows = check_outline(st)
     if bad:
         print(f"OUTLINE 未通過，有 {len(bad)} 個問題：")
         for b in bad: print("  - " + b)
         print(f"\n修改 outline.md 後再執行：{ME} check-outline"); sys.exit(2)
-    new = {"stage": "checked", "outline_hash": digest(), "angle": st.get("angle", ""), "auto": st.get("auto", False), "sources": st.get("sources")}
+    new = {"stage": "checked", **base(st), "outline_hash": digest()}
     print(f"OUTLINE OK：共 {len(rows)} 頁，每一頁的引文都在來源檔裡找到了。\n")
-    if new["auto"]:
-        new.update(stage="themed", theme=st.get("theme") or "academic"); save(new)
+    if new.get("auto"):
+        new.update(stage="themed", theme=st.get("theme") or "academic", page_mode=False); save(new)
         print(f"（使用者把決定交給你）風格採用 {new['theme']}，直接製作。最後回報時要附上完整大綱表。\n"); print(deck_howto(new)); return
     save(new)
-    print("現在把下面這張大綱表【原樣貼給使用者】，問他：頁數要增減嗎？哪一頁的說法要改？有沒有漏掉想講的？")
-    print("然後【這一輪到此結束】。不要寫 deck.json，不要執行 build。\n")
-    print("| 頁 | 版面 | 標題 |\n|---|---|---|")
-    for r in rows: print(f"| {r['n']} | {r['layout']} | {r['title']} |")
-    print(f"\n使用者說可以之後執行：{ME} approve")
+    print("現在把下面這張大綱表【原樣貼給使用者】，問他兩件事：")
+    print("（一）頁數要增減嗎？哪一頁的說法或內容要改？有沒有漏掉想講的？")
+    print("（二）接下來要一頁一頁跟他確認內容，還是整份做好再給他看？（他沒明說要逐頁，就是整份做好）")
+    print("然後【這一輪到此結束】。不要寫 deck.json，不要執行 build。下面的指令是給你執行的，不要貼給使用者看。\n")
+    print("| 頁 | 版面 | 標題 | 建議內容 |\n|---|---|---|---|")
+    for r in rows: print(f"| {r['n']} | {r['layout']} | {r['title']} | {r['suggest'] or '—'} |")
+    print(f"\n使用者說可以之後執行其中一行：\n- 整份做好再給他看（預設）：{ME} approve\n- 他明說要一頁一頁討論：{ME} approve --page-by-page")
 
-def cmd_approve(st):
+def cmd_approve(st, args):
     if not at_least(st, "checked"):
         sys.exit(f"還不能確認：大綱沒有通過檢查。執行：{ME} check-outline")
-    st["stage"] = "approved"; st.pop("note", None); save(st)
-    print("已記錄：使用者同意這份大綱。\n"); print(THEMES_TEXT.format(me=ME))
+    st.update(stage="approved", page_mode="--page-by-page" in args); st.pop("note", None); save(st)
+    print("已記錄：使用者同意這份大綱。\n"); print(themes_text(st))
 
 def cmd_theme(st, args):
     name = next((a for a in args if not a.startswith("--")), "")
@@ -375,7 +454,7 @@ def cmd_theme(st, args):
                  "- 使用者還沒看過大綱 → 先把大綱貼給他確認。")
     if name not in B.THEMES:
         sys.exit(f"沒有「{name}」這個風格，可用的是 {' / '.join(B.THEMES)}")
-    st.update(stage="themed", theme=name, page_mode="--page-by-page" in args, page=1); save(st)
+    st.update(stage="themed", theme=name, page_mode=bool(st.get("page_mode")) or "--page-by-page" in args, page=1); save(st)
     print(f"已記錄風格：{name}（{B.THEMES[name]['name']}）；製作方式：{'一頁一頁和使用者討論' if st['page_mode'] else '直接做完整份'}。\n")
     print(page_howto(st) if st["page_mode"] else deck_howto(st))
 
@@ -435,7 +514,7 @@ def cmd_build(st):
         st["stage"] = "built"; save(st)
         print("\n全部通過。把上面幾行【原樣貼給使用者】，並列出每頁的版面與標題。")
     else:
-        print(f"\n還有沒通過的檢查。修改 deck.json 後再執行：{ME} build\n（如果要改的是標題或頁數，那是改大綱：改 outline.md → check-outline → 再給使用者確認。）")
+        print(f"\n還有沒通過的檢查，簡報【還沒做好】，不可以跟使用者說完成。這一輪就接著修 deck.json，再執行：{ME} build，直到印出「全部通過」。\n（如果要改的是標題或頁數，那是改大綱：改 outline.md → check-outline → 再給使用者確認。）")
         sys.exit(2)
 
 AUTO_WORDS = ("不用問", "不用确认", "不用確認", "全部交給", "都交給", "你決定", "你决定", "自己決定", "自動流程", "沒有人可以問")
@@ -451,18 +530,20 @@ def cmd_auto(st, args):
     print("已記錄：使用者把所有決定交給你、不用問他（只有他明說「全部交給你」「不用問我」才可以這樣做；")
     print("他只是選了風格、或說「整份做好再給我看」，都【不算】——那種情況請改用 theme 指令）。")
     print(f"主軸由你決定，風格採用 {name}，不逐頁討論。最後回報時要附上完整大綱表，並說明哪些是你替他決定的。\n")
+    st.setdefault("audience", "（使用者交給你決定）"); st.setdefault("minutes", 10); st.setdefault("direction", "沒有")
     if at_least(st, "checked"):
         st.update(stage="themed", theme=name, page_mode=False); save(st); print(deck_howto(st)); return
     st["stage"] = "angled"; st["theme"] = name; st.setdefault("angle", "（使用者交給你決定：選一個最能撐起核心訊息的講法）"); save(st)
-    print("先讀完每個來源檔，再照下面的說明寫大綱。\n"); print(OUTLINE_HOWTO.format(files=file_list(), me=ME, angle=st["angle"]))
+    print("先讀完每個來源檔，再照下面的說明寫大綱。\n"); print(outline_howto(st))
 
 def main():
     cmd = sys.argv[1] if len(sys.argv) > 1 else "next"; st = load(); rest = sys.argv[2:]
     if cmd == "next": cmd_next(st)
+    elif cmd == "setup": cmd_setup(st, " ".join(rest))
     elif cmd == "angle": cmd_angle(st, " ".join(rest))
     elif cmd == "sources-ok": cmd_sources_ok(st)
     elif cmd == "check-outline": cmd_check(st)
-    elif cmd == "approve": cmd_approve(st)
+    elif cmd == "approve": cmd_approve(st, rest)
     elif cmd == "theme": cmd_theme(st, rest)
     elif cmd == "page-ok": cmd_page_ok(st)
     elif cmd == "pages-off": cmd_pages_off(st)
