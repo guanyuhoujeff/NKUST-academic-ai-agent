@@ -237,6 +237,8 @@ def check_review(rows, st):
         if not ss: bad.append(f"第 {si} 節是空的")
         for s in ss:
             short = s[:40] + ("…" if len(s) > 40 else "")
+            if "（（" in s or "((" in s or "））" in s or "))" in s:
+                bad.append(f"第 {si} 節這句的括號重複了：「{short}」。出處只包一層括號：（作者, 年，第 N 頁）"); continue
             cites = parse_cites(s)
             if not cites:
                 bad.append(f"第 {si} 節這句沒有出處：「{short}」。每一句都要在句尾標（作者, 年，第 N 頁）"); continue
