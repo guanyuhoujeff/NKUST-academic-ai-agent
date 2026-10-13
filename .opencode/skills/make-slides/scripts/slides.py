@@ -10,7 +10,7 @@
   python slides.py page-ok              （逐頁模式）使用者同意目前這一頁之後執行
   python slides.py pages-off            （逐頁模式）使用者說「剩下的你直接做完」時執行
   python slides.py build                產生 slides.pptx 並檢查
-  python slides.py sources-ok           使用者確認新放進來源（literature.md、notes/、sources/）的檔案是他放的
+  python slides.py sources-ok           使用者確認新放進來源（literature*.md、notes/、sources/）的檔案是他放的
   python slides.py auto "使用者原話" [代號]   使用者明說「全部交給你、不用問我」時執行，跳過所有停頓點
 進度記在 .slides-state.json；大綱改過就要重新檢查、重新給使用者確認。
 """
@@ -38,7 +38,7 @@ def load():
 
 
 def all_sources():
-    """來源 = literature*.md（fetch-literature 換關鍵字時保存的舊清單也算）+ notes/**/*.md（不含 README.md）+ sources/**/*.md"""
+    """來源 = literature*.md（fetch-literature 用 --out 存的清單也算）+ notes/**/*.md（不含 README.md）+ sources/**/*.md"""
     found = list(pathlib.Path(".").glob("literature*.md"))
     for d in ("notes", "sources"):
         if pathlib.Path(d).exists(): found += [p for p in pathlib.Path(d).glob("**/*.md") if p.name != "README.md"]

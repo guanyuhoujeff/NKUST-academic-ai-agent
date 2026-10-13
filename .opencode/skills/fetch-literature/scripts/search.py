@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """向 OpenAlex 查文獻、寫出 literature.md：期刊範圍由程式讀對照表決定，AI 不用自己組網址、不用自己挑期刊。
-換關鍵字時，原本的 literature.md 會先改名成 literature-<舊關鍵字>.md 保存，不會被覆蓋。
 
   python search.py "關鍵字"                         查對照表裡全部期刊（＝頂刊）
   python search.py "關鍵字" --journal "刊名或ISSN"   只查這一本（必須已在對照表裡）
   python search.py "關鍵字" --from 2015             只要 2015 年以後的
   python search.py "關鍵字" --n 30                  列出被引最多的前 30 篇（預設 10，最多 200）
+  python search.py "關鍵字" --out 檔名.md            寫到指定檔名（預設 literature.md；同名會覆蓋）
 
 關鍵字用英文；多個字直接放在引號裡，例如 "option pricing"。
 金鑰：讀環境變數 OPENALEX_API_KEY；沒有就停下來，不會用沒金鑰的網址查。
@@ -19,8 +19,6 @@ for _s in (sys.stdout, sys.stderr):   # Windows 的主控台是 cp950，不改�
 ME = "python .opencode/skills/fetch-literature/scripts/search.py"
 JOURNAL_PY = "python .opencode/skills/fetch-literature/scripts/journal.py"
 TABLE = pathlib.Path(__file__).resolve().parent.parent / "references" / "journals.md"
-OUT = pathlib.Path("literature.md")                     # 永遠寫在工作資料夾
-TITLE = "# 文獻清單："                                   # 第一行；keep_old 靠它認出舊檔的關鍵字
 ISSN = re.compile(r"^\d{4}-\d{3}[\dXx]$")
 SELECT = "doi,title,publication_year,cited_by_count,authorships,primary_location"
 
@@ -43,20 +41,22 @@ def journals():
 
 
 def parse(argv):
-    kw, journal, year, n = [], None, None, 10
+    kw, journal, year, n, out = [], None, None, 10, "literature.md"
     i = 0
     while i < len(argv):
         a = argv[i]
         if a == "--journal": journal = argv[i + 1]; i += 2
         elif a == "--from": year = argv[i + 1]; i += 2
         elif a == "--n": n = int(argv[i + 1]); i += 2
+        elif a == "--out": out = argv[i + 1]; i += 2
         else: kw.append(a); i += 1
     kw = " ".join(kw).strip()
     if not kw: sys.exit(__doc__)
     if re.search(r"[一-鿿]", kw): sys.exit(f"關鍵字要用英文（OpenAlex 的論文幾乎都是英文，中文一定 0 筆）。請使用者確認英文詞再查。")
     if year and not re.fullmatch(r"\d{4}", year): sys.exit("--from 後面要接四位數年份，例如 --from 2015")
     if not 1 <= n <= 200: sys.exit("--n 要在 1 到 200 之間")
-    return kw, journal, year, n
+    if not out.endswith(".md") or "/" in out or "\\" in out: sys.exit("--out 只能是工作資料夾裡的 .md 檔名，例如 --out literature-fintech.md")
+    return kw, journal, year, n, pathlib.Path(out)
 
 
 def pick(journal):
@@ -82,19 +82,6 @@ def fetch(url):
         sys.exit(f"連不上 OpenAlex：{e}")
 
 
-def keep_old(kw):
-    """換了關鍵字才覆蓋 literature.md 的話，舊清單會不見。先把它改名成 literature-<舊關鍵字>.md 留著。
-    同一個關鍵字再查（例如 --n 加大）就直接覆蓋，不另存。回傳改名後的路徑，沒改名回傳 None。"""
-    if not OUT.exists(): return None
-    first = OUT.read_text(encoding="utf-8").splitlines()[0] if OUT.stat().st_size else ""
-    old_kw = first[len(TITLE):].strip() if first.startswith(TITLE) else ""
-    if old_kw == kw: return None
-    slug = re.sub(r"-+", "-", re.sub(r"[^a-z0-9]+", "-", old_kw.lower())).strip("-")
-    dst = pathlib.Path(f"literature-{slug}.md" if slug else "literature-backup.md")
-    if dst.exists(): dst.unlink()
-    OUT.rename(dst)
-    return dst
-
 
 def authors(w):
     names = [a.get("author", {}).get("display_name", "") for a in w.get("authorships", [])]
@@ -104,7 +91,7 @@ def authors(w):
 
 
 def main():
-    kw, journal, year, n = parse(sys.argv[1:])
+    kw, journal, year, n, OUT = parse(sys.argv[1:])
     key = os.environ.get("OPENALEX_API_KEY", "").strip()
     if not key:
         sys.exit("沒有 OPENALEX_API_KEY，停下來請使用者提供金鑰（申請：https://openalex.org/settings/api），不要用沒金鑰的網址查。")
@@ -121,7 +108,7 @@ def main():
     scope = rows[0][0] if journal else f"對照表全部 {len(rows)} 本期刊"
     cond = f"主題 {kw}｜期刊 {scope}｜{('從 ' + year + ' 年起') if year else '不限年份'}｜總筆數 {total}｜查詢日期 {today}"
 
-    lines = [TITLE + kw, "", cond, ""]
+    lines = [f"# 文獻清單：{kw}", "", cond, ""]
     if works:
         lines += ["| 年份 | 作者 | 標題 | 期刊 | 被引數 | DOI |", "|---|---|---|---|---|---|"]
         for w in works:
@@ -132,12 +119,10 @@ def main():
     else:
         lines.append("查詢結果：0 筆")
     lines += ["", "查詢網址（金鑰已遮）：", url + "&api_key=***", ""]
-    kept = keep_old(kw)
     OUT.write_text("\n".join(lines), encoding="utf-8")
 
     print(f"期刊範圍：{scope}（ISSN {issns}）")
     print(f"查詢網址：{url}&api_key=***")
-    if kept: print(f"原本的 literature.md 是別的關鍵字，已改名保存為 {kept.resolve()}")
     print(f"查到 {total} 筆" + (f"，已把被引最多的前 {len(works)} 篇寫進 {OUT.resolve()}" if works else ""))
     if total == 0:
         print("\n0 筆通常不是程式錯，是「這些期刊不做這個主題」或「論文用的是別的說法」。把下面兩個建議告訴使用者，讓使用者選，不要自己換：")

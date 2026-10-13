@@ -36,10 +36,11 @@ description: 找學術文獻時使用。向 OpenAlex 查詢對照表裡的頂刊
 python .opencode/skills/fetch-literature/scripts/search.py "option pricing"
 python .opencode/skills/fetch-literature/scripts/search.py "greenwashing" --journal "The Journal of Finance" --from 2015
 python .opencode/skills/fetch-literature/scripts/search.py "ESG" --n 30
+python .opencode/skills/fetch-literature/scripts/search.py "fintech" --out literature-fintech.md
 ```
 
 - 程式會寫出工作資料夾的 `literature.md`，並印出：期刊範圍、查到幾筆、列了幾篇。
-- 換了關鍵字再查，程式會先把原本的 `literature.md` 改名成 `literature-<舊關鍵字>.md` 保存，再寫新的；同一個關鍵字再查（例如加 `--n`）就直接覆蓋。程式印了「已改名保存為…」就一併告訴使用者。
+- 使用者有說要存成哪個檔（例如「存成 literature-fintech.md」）→ 加 `--out 那個檔名`；沒說就寫 `literature.md`。同名檔會被覆蓋，程式不會自己改名或備份；要保留舊清單，由使用者在指令裡指定不同檔名。
 - 使用者要更多篇 → 同樣的指令加 `--n 數字`（最多 200），其他條件不要動。
 - **不要自己組 OpenAlex 網址去查**，也不要用 webfetch；期刊範圍、金鑰、網址都由程式處理。
 
@@ -49,7 +50,7 @@ python .opencode/skills/fetch-literature/scripts/search.py "ESG" --n 30
 - 程式印出錯誤訊息（例如「對照表裡沒有這本」「關鍵字要用英文」「沒有金鑰」）→ 照訊息處理：缺期刊就走「新增期刊」，缺英文詞或金鑰就回到步驟 0 或 1 問使用者。
 
 ### 4a. 有結果：檢查後交出
-1. 列出工作資料夾的檔案，確認 `literature.md` 在裡面；讀回來，確認表格列數等於程式說「列了幾篇」。
+1. 列出工作資料夾的檔案，確認 `literature.md`（或 `--out` 指定的檔）在裡面；讀回來，確認表格列數等於程式說「列了幾篇」。
 2. 確認每一列的 DOI 都以 `https://doi.org/` 開頭、期刊都在對照表裡。
 3. 回覆使用者：查了什麼（關鍵字、期刊範圍、年份）、總共幾筆、列出前幾篇、檔案路徑。程式說「還有 X 篇沒列出」就一併說，使用者要更多就加 `--n`。
 4. 標題、作者、DOI **照檔案原樣**，不可改寫、不可翻譯、不可補上檔案裡沒有的論文。
