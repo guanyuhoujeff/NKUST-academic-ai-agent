@@ -45,6 +45,15 @@ python .opencode/skills/analyze-literature/scripts/analyze.py papers/<檔名>.pd
 
 產出為 `notes/<檔名>.<名稱>.md`。同一篇 PDF 不會重新上傳，程式會沿用第一次建立的 notebook。
 
+### 3b. 使用者對某一篇有問題時：追問
+使用者說「問 Horvath 那篇樣本期間是哪幾年」這類話，就對那篇執行：
+
+```
+python .opencode/skills/analyze-literature/scripts/analyze.py papers/<檔名>.pdf --ask "使用者的問題原句"
+```
+
+產出 `notes/<檔名>.ask1.md`（第二次追問 ask2，以此類推），同樣沿用既有 notebook、不重新上傳。回答原文照貼給使用者，附上檔名；原文寫「文中未述」就照實說，不要自己補答案。分析時加過 `--cleanup` 的論文沒有 notebook 可問，告訴使用者要重新分析一次。
+
 ### 4. 做總表
 全部做完後寫 `notes/README.md`：一張表格，每篇一列，欄位為：檔名｜文獻卡連結｜NotebookLM 連結（取自文獻卡開頭的 `notebook:`）。
 

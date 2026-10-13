@@ -3,6 +3,7 @@
 用法:
   python analyze.py papers/某篇.pdf                                   # 用 references/main_prompt.md → notes/某篇.md
   python analyze.py papers/某篇.pdf --prompt references/did_prompt.md # 用其他 prompt → notes/某篇.did.md
+  python analyze.py papers/某篇.pdf --ask "樣本期間是哪幾年？"           # 追問一個問題 → notes/某篇.ask1.md（第二次 ask2，以此類推）
 同一篇 PDF 第二次分析時沿用第一次建立的 notebook（記在 notes/某篇.json），不重新上傳。
 """
 import json, os, subprocess, sys, datetime, pathlib, argparse, importlib.util, shutil
@@ -35,16 +36,27 @@ def main():
     ap.add_argument("pdf")
     ap.add_argument("--prompt", default=str(HERE.parent / "references" / "main_prompt.md"))
     ap.add_argument("--cleanup", action="store_true", help="分析完就刪掉 notebook（篇數多、怕超過筆記本上限時用）")
+    ap.add_argument("--ask", help="對這篇追問一個問題（沿用既有 notebook，不重新上傳）")
     a = ap.parse_args()
     pdf, prompt_file = pathlib.Path(a.pdf), pathlib.Path(a.prompt)
     if not pdf.exists() or pdf.suffix.lower() != ".pdf":
         sys.exit(f"找不到 PDF：{pdf}")
-    if not prompt_file.exists():
-        sys.exit(f"找不到 prompt：{prompt_file}")
-    prompt = prompt_file.read_text(encoding="utf-8")
-    tag = prompt_file.stem.removesuffix("_prompt")           # main_prompt → main
     out = pathlib.Path("notes"); out.mkdir(exist_ok=True)
     js = out / (pdf.stem + ".json")                           # 第一次分析留下的 notebook 紀錄
+    if a.ask:
+        if not a.ask.strip(): sys.exit("--ask 後面要接問題")
+        prev = json.loads(js.read_text(encoding="utf-8")).get("queries", {}) if js.exists() else {}
+        n = 1 + sum(1 for k in prev if k.startswith("ask"))
+        tag = f"ask{n}"
+        prompt = ("請用繁體中文回答下面這個問題，只根據這篇文獻的內容，每一點註明原文頁碼或章節；"
+                  "原文沒有寫的就寫「文中未述」，不可自行補充。\n\n問題：" + a.ask.strip())
+        prompt_label = f"追問：{a.ask.strip()}"
+    else:
+        if not prompt_file.exists():
+            sys.exit(f"找不到 prompt：{prompt_file}")
+        prompt = prompt_file.read_text(encoding="utf-8")
+        tag = prompt_file.stem.removesuffix("_prompt")       # main_prompt → main
+        prompt_label = prompt_file.name
     md = out / (pdf.stem + (".md" if tag == "main" else f".{tag}.md"))
 
     if js.exists() and (nb := json.loads(js.read_text(encoding="utf-8")).get("notebook")):
@@ -57,7 +69,7 @@ def main():
         nlm("source", "add", nb_id, "--file", str(pdf), "--wait", "--json", cleanup=nb_id)
         print("PDF 已上傳並處理完成")
 
-    print(f"用 {prompt_file.name} 提問（約 1–3 分鐘）…")
+    print(f"用 {prompt_label} 提問（約 1–3 分鐘）…")
     q = json.loads(nlm("notebook", "query", nb_id, prompt, "--json", timeout=900))
 
     record = json.loads(js.read_text(encoding="utf-8")) if js.exists() else {}
@@ -70,7 +82,7 @@ def main():
     js.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
 
     refs = q.get("references") or []
-    lines = ["---", f"source_pdf: {pdf.name}", f"prompt: {prompt_file.name}", f"notebook: {nb_url}",
+    lines = ["---", f"source_pdf: {pdf.name}", f"prompt: {prompt_label}", f"notebook: {nb_url}",
              f"analyzed: {datetime.date.today()}", "generated_by: NotebookLM（經 nlm CLI）", "---", "",
              q["answer"].rstrip(), ""]
     if refs:
