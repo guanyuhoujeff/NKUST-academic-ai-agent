@@ -1,3 +1,6 @@
 # Ollama API key（write-review 初篩用），不可以上傳
 .ollama_key
 __pycache__/
+# 金鑰檔不可上傳
+key.txt
+*.key
