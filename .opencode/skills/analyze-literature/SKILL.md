@@ -34,7 +34,7 @@ python .opencode/skills/analyze-literature/scripts/analyze.py papers/<檔名>.pd
 這支程式會：建一個 NotebookLM notebook → 上傳 PDF → 用 `references/main_prompt.md` 的提示詞提問 → 把回答寫成 `notes/<檔名>.md`，並把完整回傳存成 `notes/<檔名>.json`。
 一篇約 2–4 分鐘，**一篇做完再做下一篇**，不要同時跑多篇。
 
-篇數超過 20 篇時，每一行都加上 `--cleanup`：分析完就刪掉該篇的 notebook。免費帳號的 notebook 有數量上限（約 100 本），不刪會滿。代價是文獻卡上的 NotebookLM 連結會寫「分析後已刪除」，之後要換角度再問就得重新上傳。
+**只有使用者明說「分析完刪掉 notebook」時**，才在每一行加上 `--cleanup`：分析完就刪掉該篇的 notebook。使用者沒說就不刪，也不要自己決定。篇數超過 20 篇時，先提醒使用者：免費帳號的 notebook 有數量上限（約 100 本），不刪會滿；刪的代價是文獻卡上的 NotebookLM 連結會寫「分析後已刪除」，之後要換角度再問就得重新上傳。由使用者決定要不要刪。
 
 ### 3. 需要其他角度時：換 prompt 再問
 `references/` 裡每一份 `<名稱>_prompt.md` 都是一種分析角度，`main_prompt.md` 是預設的五步分析。要用別的角度（例如只拆解計量方法）就指定它：

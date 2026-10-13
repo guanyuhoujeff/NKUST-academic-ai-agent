@@ -298,7 +298,7 @@ ASK_HOWTO = """1. 使用者還沒講研究問題，就先問他：這篇文獻�
 PLAN_HOWTO = """1. 逐一執行下面的指令，把暫存清單裡每張文獻卡的本文【從頭讀到尾】（不要用讀檔工具開整個檔案，附錄很長、會把你的記憶塞爆）：
 {cards}
 2. 這是第二輪篩選：讀完全文，決定哪些真的放進文獻回顧、怎麼分組。
-3. 寫 plan.md，格式如下（照抄格式，內容換成你的）：
+3. 寫 plan.md，格式如下（只抄格式；括號和「卡片檔名A」都要換成真的內容，照抄會被擋）：
 
 - 研究問題：{question}
 - 讀者：修過投資學的金融系大三學生
@@ -306,9 +306,9 @@ PLAN_HOWTO = """1. 逐一執行下面的指令，把暫存清單裡每張文獻�
 
 | 節 | 主題 | 文獻卡 | 這一節要回答的問題 |
 |---|---|---|---|
-| 1 | 計算速度與校準瓶頸 | Horvath_2019_deep_learning_volatility, Ruf_Wang_2020_NN_option_pricing_review | 各文獻怎麼解決傳統方法太慢的問題？ |
-| 2 | 定價準確度的證據 | Horvath_2019_deep_learning_volatility, Ruf_Wang_2020_NN_option_pricing_review | 準確度怎麼衡量？結果一致嗎？ |
-| 3 | 研究{gap} | Horvath_2019_deep_learning_volatility, Ruf_Wang_2020_NN_option_pricing_review | 各文獻自己承認的限制有哪些？還有什麼沒人做？ |
+| 1 | （主題一，從文獻卡歸納） | 卡片檔名A, 卡片檔名B | （這一節要回答的問題） |
+| 2 | （主題二） | 卡片檔名A, 卡片檔名C | （這一節要回答的問題） |
+| 3 | 研究{gap} | 卡片檔名A, 卡片檔名B, 卡片檔名C | 各文獻自己承認的限制有哪些？還有什麼沒人做？ |
 
 規則：
 - 按【主題】分節，不是一篇一節。每個主題節至少放 2 張文獻卡，因為文獻回顧是比較，不是摘要。
@@ -370,7 +370,12 @@ def say_screened(st):
     print("完整紀錄在 screening.md。")
     if st.get("auto"):
         print(f"使用者交給你決定，直接執行：{ME} approve"); return
-    print("- 使用者還沒看過 → 把 screening.md 的「相關」和「不相關」各列一份給他（檔名＋理由），問他要不要撈回或剔除哪幾篇，然後【這一輪到此結束】。")
+    done = st.get("judged", {})
+    print("\n下面這張表是程式判的結果，【原樣貼給使用者】，理由不要改寫、不要縮短、不要自己補：\n")
+    print("| 文獻卡 | 判斷 | 理由 |\n|---|---|---|")
+    for s_ in cards():
+        if s_ in done: print(f"| {s_} | {done[s_]['verdict']} | {done[s_]['reason'].replace('|', '／')} |")
+    print("\n- 貼完問使用者要不要撈回或剔除哪幾篇，然後【這一輪到此結束】。")
     print(f'- 使用者要撈回某篇 → {ME} include 檔名 "使用者說的理由"；要剔除 → {ME} exclude 檔名 "理由"')
     print(f"- 使用者說可以 → {ME} approve")
 
@@ -474,11 +479,16 @@ def cmd_show(st, args):
     stem = args[0].removesuffix(".md").split("/")[-1]; cs = pool(st)
     if stem not in cs: sys.exit(f"{stem} 不在暫存清單裡。可以看的：{'、'.join(cs)}")
     body = cs[stem]["text"].split("## 附錄：引用的原文片段")[0].rstrip().rstrip("-").rstrip()
+    save({**st, "shown": sorted(set(st.get("shown", [])) | {stem})})
     print(body); print(f"\n（以上是 {stem} 的本文；附錄的原文片段省略。內文引用寫成：（{cs[stem]['cite']}，{'第 N 頁' if cs[stem]['pages'] else '某某 節'}））")
 
 def cmd_check_plan(st):
     if not at_least(st, "planning"): sys.exit(f"還不能寫架構：初篩還沒做完或還沒給使用者確認。執行：{ME} next")
     bad, rows = check_plan(st)
+    used = {c for r in rows for c in r["cards"]} if rows else set()
+    unread = sorted(used - set(st.get("shown", [])))
+    if unread:
+        bad = bad + [f"這些卡還沒用 show 讀過，不能排進架構：{'、'.join(unread)}。先逐一執行 {ME} show 檔名，讀完再 check-plan。"]
     if bad:
         print(f"PLAN 未通過，有 {len(bad)} 個問題："); [print("  - " + b) for b in bad]
         print(f"\n修改 plan.md 後再執行：{ME} check-plan"); return
