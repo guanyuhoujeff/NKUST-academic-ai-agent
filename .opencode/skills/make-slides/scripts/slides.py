@@ -38,8 +38,8 @@ def load():
 
 
 def all_sources():
-    """來源 = literature.md + notes/**/*.md（不含 README.md）+ sources/**/*.md"""
-    found = [pathlib.Path("literature.md")] if pathlib.Path("literature.md").exists() else []
+    """來源 = literature*.md（fetch-literature 換關鍵字時保存的舊清單也算）+ notes/**/*.md（不含 README.md）+ sources/**/*.md"""
+    found = list(pathlib.Path(".").glob("literature*.md"))
     for d in ("notes", "sources"):
         if pathlib.Path(d).exists(): found += [p for p in pathlib.Path(d).glob("**/*.md") if p.name != "README.md"]
     return sorted(found)

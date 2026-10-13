@@ -39,6 +39,7 @@ python .opencode/skills/fetch-literature/scripts/search.py "ESG" --n 30
 ```
 
 - 程式會寫出工作資料夾的 `literature.md`，並印出：期刊範圍、查到幾筆、列了幾篇。
+- 換了關鍵字再查，程式會先把原本的 `literature.md` 改名成 `literature-<舊關鍵字>.md` 保存，再寫新的；同一個關鍵字再查（例如加 `--n`）就直接覆蓋。程式印了「已改名保存為…」就一併告訴使用者。
 - 使用者要更多篇 → 同樣的指令加 `--n 數字`（最多 200），其他條件不要動。
 - **不要自己組 OpenAlex 網址去查**，也不要用 webfetch；期刊範圍、金鑰、網址都由程式處理。
 
