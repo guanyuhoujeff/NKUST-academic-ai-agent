@@ -61,7 +61,7 @@
 | **找文獻** `fetch-literature` | 用 fetch-literature 找頂刊 option pricing 的論文，存成 literature-option-pricing.md | 你指定的檔名（不說就是 `literature.md`，同名會覆蓋）：附 DOI 的文獻清單。「頂刊」＝期刊對照表裡的全部期刊；要限年份或指定期刊就直接說 |
 | **分析文獻** `analyze-literature` | 用 analyze-literature 分析 papers/ 裡的論文<br>（先把 PDF 放進 `papers` 資料夾） | `notes/` 裡每篇一張**文獻卡**，每一點都標了原文頁碼。每篇會在你的 Google 帳號留一個 NotebookLM 筆記本，不會自己刪；要刪就在句尾加「分析完刪掉 notebook」 |
 | **寫文獻回顧** `write-review` | 用 write-review 幫我寫文獻回顧，讀者是金融系大三學生 | `screening.md`（每篇相關或不相關＋理由）、`review.md`（每一句都有出處的文獻回顧，參考文獻由程式產生） |
-| **做簡報** `make-slides` | 用 make-slides 把 notes/ 裡的文獻卡做成報告 | 它會先問你聽眾、幾分鐘、方向（資料夾有 `literature` 清單時再問要不要用，清單只有書目），再提 2–3 個主軸讓你挑，貼大綱（每頁放什麼）給你確認、問你要不要逐頁討論，最後選風格才製作。`slides.pptx`：可以用 PowerPoint 打開修改。來源＝`notes/` 文獻卡＋`sources/` 裡你自己放的 .md（＋你說要的清單）。不會畫圖表。要再做一份就說「重新做一份簡報」 |
+| **做簡報** `make-slides` | 用 make-slides 把 notes/ 裡的文獻卡做成報告 | 它會先問你聽眾、幾分鐘、方向（資料夾有 `literature` 清單時再問要不要用，清單只有書目），再提 2–3 個主軸讓你挑，貼大綱（每頁放什麼）給你確認、問你要不要逐頁討論，最後選風格才製作。`slides.pptx`：可以用 PowerPoint 打開修改。來源＝`notes/` 文獻卡＋`sources/` 裡你自己放的 .md（＋你說要的清單）。不會畫圖表。做好後說「把簡報匯出成 md」會得到同內容的 `slides.md`，可貼到 Gamma 比較。要再做一份就說「重新做一份簡報」 |
 | **一次跑完** `lit-pipeline` | 用 lit-pipeline 幫我做選擇權定價的文獻報告<br>（先把 PDF 放進 `papers`，否則只會有清單和簡報） | 依序跑完上面四步，**中途不會停下來問你**，初篩、分組、簡報主軸都由它決定，做完請事後驗收 |
 
 ### 找你自己領域的期刊

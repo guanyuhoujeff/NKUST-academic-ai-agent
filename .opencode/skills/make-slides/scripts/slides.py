@@ -5,6 +5,7 @@
   python slides.py setup "聽眾：…；時間：N 分鐘；方向：…[；清單：要/不要]"
                                         問完聽眾、時間、方向（工作資料夾有 literature 清單時再加問要不要用）之後執行
   python slides.py new                  使用者說要重新做一份新的簡報時執行（清掉進度，從第一關開始）
+  python slides.py export-md            使用者要 Markdown 版（例如貼到 Gamma 比較）時執行：把 deck.json 逐字轉成 slides.md
   python slides.py angle "選定的主軸"    使用者選好主軸（講法）之後執行
   python slides.py check-outline        檢查 outline.md
   python slides.py approve [--page-by-page]
@@ -410,6 +411,7 @@ def cmd_next(st):
         print("進度記錄說簡報做好了，但找不到上一次 build 的檢查結果。【不要自己寫任何檢查結果】；要確認就執行："
               f"{ME} build\n")
     print(f"接下來看使用者要什麼：\n- 改內容 → 改 deck.json 再執行 {ME} build\n- 改大綱 → 改 outline.md 再執行 check-outline\n"
+          f"- 要 Markdown 版（例如貼到 Gamma 比較）→ 執行：{ME} export-md\n"
           f"- 要重新做一份新的簡報 → 先跟他說「舊的 outline.md、deck.json、slides.pptx 會被新的覆蓋」，他同意後執行：{ME} new")
 
 def cmd_new(st):
@@ -576,6 +578,52 @@ def cmd_build(st):
 
 AUTO_WORDS = ("不用問", "不用确认", "不用確認", "全部交給", "都交給", "你決定", "你决定", "自己決定", "自動流程", "沒有人可以問")
 
+MDFILE = pathlib.Path("slides.md")
+
+def cell(x): return str(x).replace("|", "／").replace("\n", " ")
+
+def deck_to_md(deck):
+    """deck.json → Markdown：每頁一個 # 標題、頁與頁之間 ---；文字一個字都不改，只換成 Markdown 記號。"""
+    out = [f"# {deck.get('title', '')}"]
+    if deck.get("subtitle"): out.append(f"\n{deck['subtitle']}")
+    for sl in deck.get("slides") or []:
+        out.append("\n---\n")
+        out.append(f"# {sl.get('title', '')}")
+        lay = sl.get("layout")
+        if lay == "section":
+            for k in ("kicker", "subtitle"):
+                if sl.get(k): out.append(f"\n{sl[k]}")
+        if lay == "bignumber":
+            out.append(f"\n**{sl.get('number', '')}**" + (f"　{sl['caption']}" if sl.get("caption") else ""))
+        if lay == "quote":
+            out.append(f"\n> {sl.get('quote', '')}" + (f"\n>\n> —— {sl['by']}" if sl.get("by") else ""))
+        if lay == "table" and sl.get("table"):
+            rows = sl["table"]; out.append("")
+            out.append("| " + " | ".join(cell(c) for c in rows[0]) + " |")
+            out.append("|" + "---|" * len(rows[0]))
+            for r in rows[1:]: out.append("| " + " | ".join(cell(c) for c in r) + " |")
+        if lay == "compare":
+            for side in ("left", "right"):
+                part = sl.get(side) or {}
+                out.append(f"\n**{part.get('heading', '')}**\n")
+                out += [f"- {b}" for b in part.get("bullets") or []]
+        if sl.get("bullets") and lay != "section":
+            out.append(""); out += [f"- {b}" for b in sl["bullets"]]
+        if sl.get("note"): out.append(f"\n{sl['note']}")
+    if deck.get("sources"):
+        out.append("\n---\n"); out.append("# 資料來源\n"); out += [f"- {x}" for x in deck["sources"]]
+    return "\n".join(out).strip() + "\n"
+
+def cmd_export_md(st):
+    if st.get("stage") != "built":
+        sys.exit(f"還不能匯出：簡報還沒做好、還沒通過檢查。先把流程走完（執行 {ME} next 看現在在哪一關）。")
+    deck = load_deck()
+    MDFILE.write_text(deck_to_md(deck), encoding="utf-8")
+    n = len(deck.get("slides") or [])
+    print(f"已匯出 {MDFILE}：{n} 頁，內容和 slides.pptx 一字不差（由程式從 deck.json 轉出，不是重寫）。\n"
+          "每頁以 # 標題開頭、頁與頁之間用 --- 隔開；貼到 Gamma 時通常依標題分卡，分得不對可以在 Gamma 裡用 /split 調整。\n"
+          "告訴使用者檔名和頁數就好，【不要】自己改寫 slides.md 的內容；他要改內容，請改 deck.json 再 build、再匯出。")
+
 def cmd_auto(st, args):
     said = " ".join(a for a in args if a not in B.THEMES and not a.startswith("--")).strip()
     if not any(w in said for w in AUTO_WORDS):
@@ -598,6 +646,7 @@ def main():
     if cmd == "next": cmd_next(st)
     elif cmd == "setup": cmd_setup(st, " ".join(rest))
     elif cmd == "new": cmd_new(st)
+    elif cmd == "export-md": cmd_export_md(st)
     elif cmd == "angle": cmd_angle(st, " ".join(rest))
     elif cmd == "sources-ok": cmd_sources_ok(st)
     elif cmd == "check-outline": cmd_check(st)

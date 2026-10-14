@@ -38,6 +38,8 @@ python .opencode/skills/make-slides/scripts/slides.py next
 
 **重新做一份**：使用者說要做新的簡報，先告訴他舊的 outline.md、deck.json、slides.pptx 會被覆蓋，他同意後執行 `slides.py new`，從第 1 關開始。
 
+**匯出 Markdown**：簡報做好（全部通過）之後，使用者要 Markdown 版（例如貼到 Gamma 比較），執行 `slides.py export-md`，程式把 deck.json 逐字轉成 `slides.md`。不要自己寫或改 slides.md。
+
 **這個工具不會畫圖表、流程圖**，做得到的是表格、大數字、兩欄對照、引言，每頁右上角一個小圖示。使用者要圖表時照實說。
 
 例外：使用者明說「全部交給你、不用問我」時，一開始就執行 `slides.py auto "他的原話"`，所有停頓點都跳過。他只是選了風格或說「整份做好再給我看」**不算**，那仍然要走完上面的每一關。
@@ -55,6 +57,7 @@ python .opencode/skills/make-slides/scripts/slides.py next
 - `deck.json`：每一頁的實際內容。之後要改簡報，改這個檔再執行 `slides.py build`。
 - `slides.pptx`：16:9，文字與表格都是 PowerPoint 原生物件，可以直接點進去改。
 - `slides.pdf`：預覽用（電腦有 LibreOffice 才會產生）。
+- `slides.md`：使用者要求時才由 `export-md` 產生，內容和 slides.pptx 一字不差，可以貼到 Gamma 等其他簡報工具。
 
 ## 想多了解時再讀
 
