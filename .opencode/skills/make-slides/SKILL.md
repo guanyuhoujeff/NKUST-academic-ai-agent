@@ -1,6 +1,6 @@
 ---
 name: make-slides
-description: 做簡報、做投影片、產出 pptx 時使用。先和使用者定大綱與風格，再把 literature.md、notes/ 的文獻卡或 sources/ 裡的檔案做成可以用 PowerPoint 編輯的 slides.pptx。載入後第一個動作：執行 python .opencode/skills/make-slides/scripts/slides.py next，照它印的做。
+description: 做簡報、做投影片、產出 pptx 時使用。把 literature.md、notes/ 的文獻卡或 sources/ 裡的檔案做成可以用 PowerPoint 編輯的 slides.pptx。先載入這個 skill，載入後第一個動作是執行 python .opencode/skills/make-slides/scripts/slides.py next，照它印的做；在那之前不要問使用者任何問題，也不要用提問工具（question）。
 ---
 
 # 做簡報
@@ -19,7 +19,7 @@ python .opencode/skills/make-slides/scripts/slides.py next
 
 （Windows 的 `python` 無效時改用 `py`。第一次執行若說找不到 `pptx`，先執行 `python -m pip install --user python-pptx`。）
 
-它會告訴你現在在哪一關、這一關要做什麼、做完要執行哪個指令。**不要憑記憶跳到後面的步驟**——每一關都有程式把關，跳關會被擋下來。
+它會告訴你現在在哪一關、這一關要做什麼、做完要執行哪個指令。要問使用者什麼、怎麼問，都照它印的，**直接寫在回覆裡問，不要用提問工具（question）**——提問框只能填一格，使用者看不到完整的說明。**不要憑記憶跳到後面的步驟**——每一關都有程式把關，跳關會被擋下來。
 
 ## 流程全貌（給你和使用者看的地圖）
 
