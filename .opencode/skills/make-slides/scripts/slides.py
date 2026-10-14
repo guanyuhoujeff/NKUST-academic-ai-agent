@@ -2,8 +2,9 @@
 """做簡報的流程管家：告訴你現在該做哪一步，並守住每一關。
 用法（都在工作資料夾執行）:
   python slides.py next                 現在該做什麼？（每一輪對話的第一個動作）
-  python slides.py setup "聽眾：…；時間：N 分鐘；方向：…"
-                                        問完聽眾、時間、方向之後執行（使用者在指令裡講過的就不用再問）
+  python slides.py setup "聽眾：…；時間：N 分鐘；方向：…[；清單：要/不要]"
+                                        問完聽眾、時間、方向（工作資料夾有 literature 清單時再加問要不要用）之後執行
+  python slides.py new                  使用者說要重新做一份新的簡報時執行（清掉進度，從第一關開始）
   python slides.py angle "選定的主軸"    使用者選好主軸（講法）之後執行
   python slides.py check-outline        檢查 outline.md
   python slides.py approve [--page-by-page]
@@ -29,21 +30,32 @@ import build as B
 
 ME = "python .opencode/skills/make-slides/scripts/slides.py"
 STATE, OUTLINE, DECK = pathlib.Path(".slides-state.json"), pathlib.Path("outline.md"), pathlib.Path("deck.json")
+BUILDLOG = pathlib.Path(".slides-build.txt")   # 上一次 build 的檢查結果原文；回報時由程式印出，不讓模型憑記憶轉貼
 ORDER = ["start", "setup", "angled", "checked", "approved", "themed", "built"]
-KEEP = ("angle", "auto", "sources", "audience", "minutes", "direction", "theme", "page_mode")   # 退回前一關時仍要留著的紀錄
+KEEP = ("angle", "auto", "sources", "audience", "minutes", "direction", "lists", "theme", "page_mode")   # 退回前一關時仍要留著的紀錄
 
 def base(st): return {k: st[k] for k in KEEP if k in st}
 
+def raw_state():
+    try: return json.loads(STATE.read_text(encoding="utf-8")) if STATE.exists() else {}
+    except Exception: return {}
+
 def load():
-    st = json.loads(STATE.read_text(encoding="utf-8")) if STATE.exists() else {"stage": "start"}
+    st = raw_state() or {"stage": "start"}
+    if st.get("stage", "start") != "start" and "audience" not in st and not st.get("auto"):
+        # 舊版工具包留下的進度（沒有聽眾／時間／方向那一關）：作廢，從頭開始
+        st = {"stage": "start", "note": "資料夾裡的進度是舊版工具留下的，已作廢、從第一關重新開始（舊的 outline.md、deck.json、slides.pptx 之後會被新的覆蓋）"}
+        save(st); BUILDLOG.unlink(missing_ok=True)
     if OUTLINE.exists() and st.get("outline_hash") and st["outline_hash"] != digest():
         st = {"stage": "angled", **base(st), "note": "outline.md 改過了，要重新檢查、重新給使用者確認"}
     return st
 
 
+def list_files(): return sorted(pathlib.Path(".").glob("literature*.md"))
+
 def all_sources():
-    """來源 = literature*.md（fetch-literature 用 --out 存的清單也算）+ notes/**/*.md（不含 README.md）+ sources/**/*.md"""
-    found = list(pathlib.Path(".").glob("literature*.md"))
+    """來源 = literature*.md（使用者在第一關說「不要」就不算）+ notes/**/*.md（不含 README.md）+ sources/**/*.md"""
+    found = [] if raw_state().get("lists") == "不要" else list(list_files())
     for d in ("notes", "sources"):
         if pathlib.Path(d).exists(): found += [p for p in pathlib.Path(d).glob("**/*.md") if p.name != "README.md"]
     return sorted(found)
@@ -54,14 +66,12 @@ def manifest():
 def sources():
     """只認流程開始時就存在、且沒被改過的來源檔；新增或改過的要使用者確認（sources-ok）才算。"""
     allp = all_sources()
-    st = json.loads(STATE.read_text(encoding="utf-8")) if STATE.exists() else {}
-    known = st.get("sources")
+    known = raw_state().get("sources")
     if known is None: return allp
     return [p for p in allp if known.get(str(p)) == hashlib.sha1(p.read_bytes()).hexdigest()]
 
 def unknown_sources():
-    st = json.loads(STATE.read_text(encoding="utf-8")) if STATE.exists() else {}
-    known = st.get("sources")
+    known = raw_state().get("sources")
     if known is None: return []
     return [str(p) for p in all_sources() if known.get(str(p)) != hashlib.sha1(p.read_bytes()).hexdigest()]
 
@@ -160,7 +170,9 @@ def check_outline(st):
             bad.append(f"{tag}標題裡的 {'、'.join(sorted(ghost))} 在來源檔裡找不到。標題的數字要和來源一模一樣，不可以自己估或換算")
         if r["layout"] == "section":
             continue
-        if len(r["suggest"]) < 6 or not any(w in r["suggest"] for w in B.FORM_WORDS):
+        if (pic := B.NO_PICTURE.search(r["suggest"])):
+            bad.append(f"{tag}的「建議內容」寫了「{pic.group(0)}」，這個工具不會畫圖表、流程圖或放照片。改成工具做得到的：要點／表格／大數字／兩欄對照／引言（右上角可放小圖示）")
+        elif len(r["suggest"]) < 6 or not any(w in r["suggest"] for w in B.FORM_WORDS):
             bad.append(f"{tag}的「建議內容」要說清楚這頁放什麼形式（{'／'.join(B.FORM_WORDS)}）和用哪些材料，"
                        f"例如「三條要點：資料期間、模型名稱、加速倍數」，不要只寫「說明…」「強調…」（現在寫的是「{r['suggest'][:30]}」）")
         quotes = [q for q in re.findall(r"「([^」]{4,})」|『([^』]{4,})』|“([^”]{4,})”|\"([^\"]{4,})\"", r["evidence"]) for q in q if q]   # 「」為主，也認 『』“”""
@@ -176,24 +188,38 @@ def check_outline(st):
         bad.append("整份只用了不到 3 種版面，請依內容換用 bignumber / table / compare / quote")
     return bad, rows
 
-SETUP_HOWTO = """## 現在要做的事：確認三件事（聽眾、時間、方向），還不讀來源
+SETUP_HOWTO = """## 現在要做的事：確認{n}件事，還不讀來源
 
-來源檔有這些（現在先不要讀）：
+文獻卡與其他來源（現在先不要讀）：
 {files}
 
-先看使用者到目前為止說過的話裡，有沒有這三件：
+先看使用者到目前為止說過的話裡，有沒有這幾件：
 1. 聽眾是誰？（例如：金融系大三學生、沒讀過這些論文）
 2. 講幾分鐘？（大約一分鐘一頁）
-3. 題目或方向有沒有想好？（他說「還沒想好」「你提」也算有答）
+3. 題目或方向有沒有想好？（他說「還沒想好」「你提」也算有答）{listq}
+
+如果使用者提到要「圖表」「流程圖」「很多圖」：先老實告訴他，這個工具不會畫圖表或流程圖，做得到的是表格、大數字、兩欄對照、引言，每頁右上角可放一個小圖示。
 
 然後二選一：
-- 三件都有了 → 【現在就用工具執行】這一行，不要回覆使用者、不要結束這一輪（把指令寫在回覆裡給他看不算執行）：
-  {me} setup "聽眾：…；時間：N 分鐘；方向：…"
+- 都有了 → 【現在就用工具執行】這一行，不要回覆使用者、不要結束這一輪（把指令寫在回覆裡給他看不算執行）：
+  {me} setup "{example}"
   （聽眾、方向照他的原話寫，不要改寫；時間寫數字；方向沒想好就寫「沒有」。執行後它會接著告訴你怎麼讀來源、怎麼提主軸，同一輪就做完。）
 - 有缺 → 只問缺的那幾件，一次問完，然後【這一輪到此結束】等他回覆。他回覆之後，下一輪的第一個動作就是執行上面那行 setup。
 
 這一輪不要讀來源檔、不要提主軸、不要寫 outline.md。
 """
+
+LIST_Q = """
+4. 工作資料夾裡有這些文獻清單：{lists}。清單裡【只有書目】（標題、作者、年份、期刊、被引數），沒有研究內容。
+   問他：這些清單要拿來做簡報嗎？（要＝可以做一頁「有哪些文獻」的概覽；不要＝只用文獻卡）"""
+
+def setup_howto():
+    ls = list_files()
+    files = "\n".join(f"   - {p}" for p in all_sources() if p not in ls) or "   （沒有）"
+    if ls:
+        return SETUP_HOWTO.format(n="四", files=files, me=ME, listq=LIST_Q.format(lists="、".join(str(p) for p in ls)),
+                                  example="聽眾：…；時間：N 分鐘；方向：…；清單：要或不要")
+    return SETUP_HOWTO.format(n="三", files=files, me=ME, listq="", example="聽眾：…；時間：N 分鐘；方向：…")
 
 ANGLE_HOWTO = """## 現在要做的事：和使用者談主軸（這份簡報要怎麼講）
 
@@ -206,8 +232,11 @@ ANGLE_HOWTO = """## 現在要做的事：和使用者談主軸（這份簡報要
 2. 根據來源，向使用者提出【2 到 3 個不同的主軸】讓他挑（他有說方向，主軸就要順著他的方向）。每個主軸寫三行：
    - 一句話：聽眾聽完要記住什麼
    - 怎麼講：大概的順序，例如「先講痛點 → 再講數字 → 最後講應用」
-   - 會用到：來源裡的哪些材料
+   - 會用到：來源裡的哪些材料（寫檔名）
    主軸之間要真的不一樣（例如一個從速度切入、一個從應用切入），不要只是換句話說。
+   【主軸裡提到的每個數字、案例、圖，都必須是來源檔裡真的有的】。來源沒有的成長率、價格、調查結果一律不准寫，
+   之後大綱會逐句比對來源，編出來的過不了。literature 開頭的清單只有書目，不能當研究結果引用。
+   這個工具不會畫圖表或流程圖，不要提「用圖表說明」「走勢圖」這類做不到的講法。
 3. 問使用者：選哪一個？或是他有自己的想法？然後【這一輪到此結束】，等他回覆。不要寫 outline.md。
 
 使用者選好之後執行（把他選的主軸用一兩句話寫進引號裡）：
@@ -357,7 +386,7 @@ def cmd_next(st):
         print("找不到任何來源檔（literature.md、notes/*.md、sources/*.md 都沒有）。停下來告訴使用者：請先用 fetch-literature 產出 literature.md、用 analyze-literature 產出 notes/，或把自己的 .md 放進 sources/，放好之後再叫你繼續。"
               "\n不要自己建立來源檔。"); return
     if not at_least(st, "setup"):
-        print(SETUP_HOWTO.format(files=file_list(), me=ME)); return
+        print(setup_howto()); return
     if not at_least(st, "angled"):
         print(angle_howto(st)); return
     if not OUTLINE.exists():
@@ -373,8 +402,20 @@ def cmd_next(st):
         print(themes_text(st)); return
     if not at_least(st, "built"):
         print(page_howto(st) if st.get("page_mode") else deck_howto(st)); return
-    print("簡報已經做好並通過檢查。把上一次 build 印出的檢查結果原樣貼給使用者，列出每頁的版面與標題。\n"
-          f"使用者要改內容 → 改 deck.json 再執行 {ME} build；要改大綱 → 改 outline.md 再執行 check-outline。")
+    log = BUILDLOG.read_text(encoding="utf-8") if BUILDLOG.exists() else ""
+    if log:
+        print("簡報已經做好並通過檢查。上一次 build 的檢查結果原文如下（要給使用者看就照這幾行貼，一個字都不要改、不要補）：\n")
+        print(log.strip() + "\n")
+    else:
+        print("進度記錄說簡報做好了，但找不到上一次 build 的檢查結果。【不要自己寫任何檢查結果】；要確認就執行："
+              f"{ME} build\n")
+    print(f"接下來看使用者要什麼：\n- 改內容 → 改 deck.json 再執行 {ME} build\n- 改大綱 → 改 outline.md 再執行 check-outline\n"
+          f"- 要重新做一份新的簡報 → 先跟他說「舊的 outline.md、deck.json、slides.pptx 會被新的覆蓋」，他同意後執行：{ME} new")
+
+def cmd_new(st):
+    save({"stage": "start"}); BUILDLOG.unlink(missing_ok=True)
+    print("已清掉進度，從第一關重新開始（舊的 outline.md、deck.json、slides.pptx 還在，之後會被新的覆蓋）。\n")
+    print(setup_howto())
 
 def cmd_sources_ok(st):
     u = unknown_sources()
@@ -385,7 +426,8 @@ def cmd_sources_ok(st):
 def cmd_setup(st, text):
     aud = re.search(r"聽眾[：:]\s*([^；;]+)", text)
     mins = re.search(r"時間[：:]\s*(\d+)", text)
-    dirn = re.search(r"方向[：:]\s*(.*)", text)
+    dirn = re.search(r"方向[：:]\s*([^；;]*)", text)
+    lst = re.search(r"清單[：:]\s*([^；;]*)", text)
     if not (aud and mins and dirn):
         sys.exit(f'要把三件事都寫進引號裡，例如：{ME} setup "聽眾：金融系大三學生；時間：8 分鐘；方向：沒有"\n'
                  "（聽眾或時間使用者還沒說，先問他，這一輪到此結束；不要自己猜。方向他沒想好就寫「沒有」，不用再問。）")
@@ -395,11 +437,25 @@ def cmd_setup(st, text):
         sys.exit(f"設定裡有簡體字：{'、'.join(sc)}。改成台灣繁體中文再執行一次 setup")
     if not 1 <= int(mins.group(1)) <= 120:
         sys.exit("時間要在 1 到 120 分鐘之間")
+    lists = None
+    if list_files():
+        v = lst.group(1).strip() if lst else ""
+        if re.search(r"不", v): lists = "不要"
+        elif re.search(r"要|用|好|可以|是", v): lists = "要"
+        else:
+            sys.exit(f"工作資料夾有文獻清單（{'、'.join(str(p) for p in list_files())}），要問使用者要不要拿來做簡報，"
+                     f'把他的回答寫進去，例如：{ME} setup "聽眾：…；時間：8 分鐘；方向：沒有；清單：不要"\n'
+                     "（他還沒回答就先問他，這一輪到此結束。）")
     if at_least(st, "checked"):
         print("注意：大綱已經寫好了。改設定之後，outline.md 要重新檢查、重新給使用者確認。")
-    new = {"stage": "setup", **base(st), "audience": aud.group(1).strip(), "minutes": int(mins.group(1)), "direction": direction}
+    new = {"stage": "setup", **base(st), "audience": aud.group(1).strip(), "minutes": int(mins.group(1)), "direction": direction, "lists": lists}
     new.pop("angle", None); save(new)
-    print(f"已記錄：聽眾＝{new['audience']}；時間＝{new['minutes']} 分鐘；方向＝{new['direction']}\n")
+    new["sources"] = manifest(); save(new)   # 設定好的這一刻，資料夾裡的來源就是使用者要用的來源
+    print(f"已記錄：聽眾＝{new['audience']}；時間＝{new['minutes']} 分鐘；方向＝{new['direction']}"
+          + ("" if lists is None else f"；文獻清單＝{lists}") + "\n")
+    if re.search(r"圖|視覺|圖像化|插畫", direction):
+        print("使用者提到圖。回覆使用者時【第一段照抄這一句】：\n"
+              "「先說明：這個工具不會畫圖表、流程圖或放照片；做得到的是表格、大數字、兩欄對照、引言，每頁右上角可以放一個小圖示。我會盡量用這些讓簡報好讀。」\n")
     print("【不要停下來】這一輪就接著做下面的事：讀來源檔 → 提 2 到 3 個主軸給使用者挑。\n")
     print(angle_howto(new))
 
@@ -507,11 +563,12 @@ def cmd_build(st):
         sys.exit(f"BUILD FAILED: deck.json 的 theme 是「{deck.get('theme')}」，但使用者選的是「{st['theme']}」。請改成 {st['theme']}。")
     r = subprocess.run([sys.executable, str(HERE / "build.py"), "deck.json", "slides.pptx", "--pdf"], capture_output=True,
                        text=True, encoding="utf-8", errors="replace", env={**os.environ, "PYTHONIOENCODING": "utf-8"})
-    print((r.stdout + r.stderr).strip())
+    out = (r.stdout + r.stderr).strip(); print(out)
     lines = [l for l in r.stdout.splitlines() if l.startswith("[") and not l.startswith("[預覽]")]
     ok = r.returncode == 0 and all(("通過" in l) or (l.startswith("[字型]") and "←" not in l) for l in lines)
     if ok:
         st["stage"] = "built"; save(st)
+        BUILDLOG.write_text(out + "\n", encoding="utf-8")
         print("\n全部通過。把上面幾行【原樣貼給使用者】，並列出每頁的版面與標題。")
     else:
         print(f"\n還有沒通過的檢查，簡報【還沒做好】，不可以跟使用者說完成。這一輪就接著修 deck.json，再執行：{ME} build，直到印出「全部通過」。\n（如果要改的是標題或頁數，那是改大綱：改 outline.md → check-outline → 再給使用者確認。）")
@@ -540,6 +597,7 @@ def main():
     cmd = sys.argv[1] if len(sys.argv) > 1 else "next"; st = load(); rest = sys.argv[2:]
     if cmd == "next": cmd_next(st)
     elif cmd == "setup": cmd_setup(st, " ".join(rest))
+    elif cmd == "new": cmd_new(st)
     elif cmd == "angle": cmd_angle(st, " ".join(rest))
     elif cmd == "sources-ok": cmd_sources_ok(st)
     elif cmd == "check-outline": cmd_check(st)
