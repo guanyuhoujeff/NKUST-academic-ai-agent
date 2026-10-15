@@ -18,7 +18,7 @@
   python slides.py auto "使用者原話" [代號]   使用者明說「全部交給你、不用問我」時執行，跳過所有停頓點
 進度記在 .slides-state.json；大綱改過就要重新檢查、重新給使用者確認。
 """
-import json, os, re, sys, hashlib, pathlib, unicodedata, subprocess, difflib
+import json, os, re, sys, hashlib, pathlib, unicodedata, subprocess, difflib, math
 
 # Windows 繁中版主控台是 cp950：來源檔裡的「‐」「é」「💡」會讓 print 當掉，中文也會被 opencode 讀成亂碼。一律用 UTF-8 輸出。
 for _stream in (sys.stdout, sys.stderr):
@@ -28,6 +28,12 @@ for _stream in (sys.stdout, sys.stderr):
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import build as B
+
+# 工作資料夾＝.opencode 的上一層。模型有時會切到 skill 資料夾裡執行（python scripts/slides.py next），
+# 這時找不到 notes/，會誤報「沒有來源檔」。2026-10-15 實測 gpt-oss 這樣做過，所以一律先切回工作資料夾。
+WORK = HERE.parents[3]
+if HERE.parents[2].name == ".opencode" and pathlib.Path.cwd().resolve() != WORK:
+    os.chdir(WORK)
 
 ME = "python .opencode/skills/make-slides/scripts/slides.py"
 STATE, OUTLINE, DECK = pathlib.Path(".slides-state.json"), pathlib.Path("outline.md"), pathlib.Path("deck.json")
@@ -105,6 +111,47 @@ def nearest(q, raw, blob):
                 if r > score and quoted_ok(c, blob): best, score = c, r
     return best if score >= 0.3 else ""
 
+QUOTE = re.compile(r"「([^」]{4,})」|『([^』]{4,})』|“([^”]{4,})”|\"([^\"]{4,})\"")   # 「」為主，也認 『』“”""
+def quotes_in(evidence): return [q for g in QUOTE.findall(evidence) for q in g if q]
+
+def clean_line(ln):
+    """文獻卡的一行去掉 markdown 記號、LaTeX 括號、[13] 這類引註與（Section 2.1, p. 16 …）頁碼括號，剩下給人看的內容。"""
+    ln = re.sub(r"\\+[()\[\]]", "", ln)
+    ln = re.sub(r"[（(][^（）()]*(?:Section|Table|p\.\s*\d)[^（）()]*[)）]", "", ln)
+    ln = re.sub(r"\[[\d,\s–\-]+\]", "", ln)
+    return re.sub(r"\s+", " ", ln.replace("**", "").strip(" \t*-#>|")).strip()
+
+def materials(r, k=8):
+    """材料包（2026-10-15）：依大綱這一頁的標題與引文，從來源檔挑出最相關的幾行。
+    gpt-oss 自己找材料時會用作者年份、行號湊數；先把相關段落印給它，它只要挑和改寫。"""
+    cjk = lambda c: len(re.findall(r"[\u4e00-\u9fff]", c)) / max(1, len(c))
+    lines = []
+    for p in sources():
+        got = [clean_line(re.sub(r"^\s*\d+\.\s*", "", ln)) for ln in p.read_text(encoding="utf-8", errors="replace").splitlines()]
+        got = [c for c in got if len(norm(c)) >= 15 and not re.search(r"[：:]$|[\U00010000-\U0010ffff]|^以下為", c)]   # 小標題、表情符號、開場白不算材料
+        zh = [c for c in got if cjk(c) >= 0.2]
+        lines += [(p.stem, c) for c in (zh if len(zh) >= 5 else got)]   # 中文文獻卡附的英文原文片段先不給；整份英文的來源照常給
+    if not lines: return []
+    quotes = [norm(q) for q in quotes_in(r["evidence"])]
+    key = r["title"] + " " + " ".join(quotes_in(r["evidence"]))
+    words = {w.lower() for w in re.findall(r"[A-Za-z][A-Za-z\-]{2,}|\d[\d,.]*\d", key)}
+    zh = norm(re.sub(r"[A-Za-z0-9]", " ", key)); grams = {zh[i:i + 2] for i in range(len(zh) - 1)}
+    df = {g: sum(g in norm(c) for _, c in lines) for g in grams}
+    def score(c):
+        n, low = norm(c), c.lower()
+        sc = sum(1 / (1 + math.log(1 + df[g])) for g in grams if g in n) + sum(2 for w in words if w in low)
+        return sc + (100 if any(q and q in n for q in quotes) else 0)   # 引文所在的那一行一定放第一個
+    ranked = sorted({c: f for f, c in lines}.items(), key=lambda fc: -score(fc[0]))
+    return [(f, c[:200] + ("…" if len(c) > 200 else "")) for c, f in ranked[:k] if score(c) >= 1.5]
+
+def materials_text(rows, only=None):
+    out = []
+    for i, r in enumerate(rows, 1):
+        if r["layout"] == "section" or (only and i != only): continue
+        m = materials(r)
+        out.append(f"第 {i} 頁「{r['title']}」\n" + ("\n".join(f"   ・〔{f}〕{c}" for f, c in m) if m else "   （沒找到相關段落，自己回來源檔找）"))
+    return "\n".join(out)
+
 # ---------- 大綱 ----------
 def parse_outline():
     txt = OUTLINE.read_text(encoding="utf-8"); rows = []
@@ -175,8 +222,8 @@ def check_outline(st):
             bad.append(f"{tag}的「建議內容」寫了「{pic.group(0)}」，這個工具不會畫圖表、流程圖或放照片。改成工具做得到的：要點／表格／大數字／兩欄對照／引言（右上角可放小圖示）")
         elif len(r["suggest"]) < 6 or not any(w in r["suggest"] for w in B.FORM_WORDS):
             bad.append(f"{tag}的「建議內容」要說清楚這頁放什麼形式（{'／'.join(B.FORM_WORDS)}）和用哪些材料，"
-                       f"例如「三條要點：資料期間、模型名稱、加速倍數」，不要只寫「說明…」「強調…」（現在寫的是「{r['suggest'][:30]}」）")
-        quotes = [q for q in re.findall(r"「([^」]{4,})」|『([^』]{4,})』|“([^”]{4,})”|\"([^\"]{4,})\"", r["evidence"]) for q in q if q]   # 「」為主，也認 『』“”""
+                       f"例如「四條要點：資料期間、模型名稱、加速倍數、誤差」，不要只寫「說明…」「強調…」（現在寫的是「{r['suggest'][:30]}」）")
+        quotes = quotes_in(r["evidence"])
         if not quotes:
             bad.append(f"{tag}的證據欄沒有引文。請從來源檔原樣抄一句，用「」括起來")
         elif max(len(q) for q in quotes) > 60:
@@ -187,6 +234,17 @@ def check_outline(st):
                        + (f"。來源裡最接近的一句是：「{hint}」——意思對的話可以直接照抄這句" if hint else "。來源裡沒有相近的句子，這一頁的說法可能不是來源講的，請換一個有依據的"))
     if len({r["layout"] for r in rows}) < 3:
         bad.append("整份只用了不到 3 種版面，請依內容換用 bignumber / table / compare / quote")
+    # 頁面結構（2026-10-15）：章節頁只有標題，放太多整份就空了
+    m = int(st.get("minutes") or 10); secs = [r["n"] for r in rows if r["layout"] == "section"]; allow = max(1, m // 10)
+    if len(secs) > allow:
+        bad.append(f"章節頁（只有標題）有 {len(secs)} 頁（第 {'、'.join(map(str, secs))} 頁），{m} 分鐘最多 {allow} 頁：只留開場那一頁，其他改成有內容的版面")
+    if rows and rows[-1]["layout"] == "section":
+        bad.append("最後一頁是章節頁（只有標題）：結尾改成 assertion 版面的「小結」，列出 3–4 條要聽眾帶走的重點")
+    need = -(-m * 6 // 10); content = len(rows) - len(secs)
+    if content < need:
+        bad.append(f"有內容的頁（section 以外）只有 {content} 頁，{m} 分鐘至少要 {need} 頁：從來源再找可以講的事實加頁")
+    if len(rows) >= 7 and not any(r["layout"] == "table" for r in rows):
+        bad.append("7 頁以上至少要有一頁 table：把來源裡的設定、樣本、結果或多篇比較整理成表（至少 4 列、3 欄）")
     return bad, rows
 
 SETUP_HOWTO = """## 現在要做的事：確認{n}件事，還不讀來源
@@ -263,15 +321,16 @@ OUTLINE_HOWTO = """## 現在要做的事：寫大綱 outline.md
 | 頁 | 版面 | 標題（一句結論） | 證據（從來源原樣抄一句，用「」括起來，後面註明哪個檔） | 建議內容（這頁放什麼） |
 |---|---|---|---|---|
 | 1 | section | 開場的一句話 | — | 只有標題 |
-| 2 | bignumber | 這一頁的結論句 | 「從來源檔原樣抄的一句話」（某某.md） | 大數字放 16,000 倍，下面兩條要點：資料期間、方法名稱 |
+| 2 | bignumber | 這一頁的結論句 | 「從來源檔原樣抄的一句話」（某某.md） | 大數字放 16,000 倍，下面三條要點：資料期間、方法名稱、比較對象 |
 
 規則：
 - 大約一分鐘一頁：{minutes} 分鐘就是 {lo} 到 {hi} 頁。
-- 「建議內容」欄用一句話告訴使用者這一頁會放什麼形式（幾條要點／一個表格／一個大數字／兩欄對照／一句引言／只有標題）和用來源裡的哪些材料，例如「三條要點：資料期間、模型名稱、加速倍數」。只寫「說明…」「強調…」會被擋下來。使用者看這一欄決定要不要改。
+- 份量：assertion 3–4 條要點；bignumber 數字下面 3 條；compare 左右各 3 條；table 至少 4 列資料、3 欄。
+- 頁面結構：章節頁（section，只有標題）{m_sec}；結尾用 assertion 寫「小結」（3–4 條重點），不要用 section；有內容的頁至少 {need} 頁；7 頁以上至少一頁 table。
+- 「建議內容」欄用一句話告訴使用者這一頁會放什麼形式（幾條要點／一個表格／一個大數字／兩欄對照／一句引言／只有標題）和用來源裡的哪些材料，例如「四條要點：資料期間、模型名稱、加速倍數、誤差」。只寫「說明…」「強調…」會被擋下來。使用者看這一欄決定要不要改。
 - 版面只能用：section（換段落／開場／結尾）、assertion（結論＋證據）、bignumber（一個大數字）、table（多筆並排）、compare（兩欄對照）、quote（引言）。至少用三種，同一種不要連續超過 3 頁。
 - 標題是一句結論，不是主題。「深度學習簡介」是主題；「神經網路把定價從幾十萬微秒縮短到幾十微秒」是結論。
 - 除了 section 以外，每一頁的證據欄都要有一句從來源檔【原樣抄下來】的話（60 字以內），用「」括起來。程式會去來源檔裡找這句話，找不到就不會過。\n- 標題要是那句引文撐得起來的結論。標題裡的數字必須和來源一模一樣，不可以自己估算（來源寫 0.5% 就不能寫成「近 30%」）。
-- 結尾頁用 section 版面。
 
 4. 寫完後執行：{me} check-outline
 """
@@ -295,10 +354,17 @@ PAGE_HOWTO = """## 現在要做的事：和使用者討論第 {i} 頁（共 {n} 
 
 大綱上這一頁是：版面 {layout}｜標題「{title}」
 {head}
+【材料包】程式從來源檔挑出和這一頁最相關的段落（〔〕裡是檔名）。要點優先從這裡挑事實改寫成短句；不夠再自己回來源檔找。
+不要寫行號、頁碼括號，也不要只寫作者年份當一條要點（出處放 note）。
+{materials}
+
 1. 回來源檔找這一頁要用的材料，把這一頁寫進 deck.json 的 slides（第 {i} 個）。layout 和 title 照大綱一字不差。
    各版面要有的欄位：assertion→bullets；bignumber→number、caption、bullets；table→table；
    compare→left 與 right（各有 heading、bullets）；quote→quote、by；section→可加 kicker、subtitle（章節頁不顯示要點，不要寫 bullets）。
-   每頁最多 5 條要點，每條最多 45 個字；數字從來源原樣抄；來源沒寫的不可以出現。
+   【份量】assertion 3–4 條要點；bignumber 數字下面 3 條；compare 左右各 3 條；table 至少 4 列資料、3 欄。
+   每條是一句 15–70 字的完整事實（compare 45 字內、bignumber 55 字內），把數字和來源裡的條件、比較對象或作者的解釋一起寫，例如「先離線用 80,000 組蒙地卡羅模擬資料訓練網路，再線上用確定性優化器校準」，不是「離線學習」這種關鍵字或半句話。開頭可以加冒號小標（例如「訓練資料：…」），會自動加粗，不加也可以；數字從來源原樣抄；來源沒寫的不可以出現。
+   細節只寫來源裡有的，不要自己補推論或誇大；出處寫在 note，不要每條後面加（作者）。
+   不夠就回來源檔找：樣本、期間、方法、數字結果、作者的解釋、限制，都是可以放的事實。
    每條要點盡量帶一個具體事實（數字、年份、樣本數、倍數、方法或作者名稱），不要寫「效果顯著」「表現優異」這種形容。
    可加 "icon"（右上角的圖示）：{icons}；不寫會依標題自動挑，寫 none 就不放。
 2. 用【人看得懂的樣子】把這一頁貼給使用者（標題＋要點或表格，不要貼 JSON），問他：這頁可以嗎？要加什麼、刪什麼、換個說法？
@@ -318,20 +384,28 @@ DECK_HOWTO = """## 現在要做的事：寫 deck.json，然後產生簡報
  "sources": [{srcs}],
  "slides": [
   {{"layout": "section", "kicker": "第一部分", "title": "…"}},
-  {{"layout": "assertion", "title": "…", "icon": "growth", "bullets": ["…", "…"], "note": "資料來源：…"}},
-  {{"layout": "bignumber", "title": "…", "number": "11", "caption": "這個數字是什麼", "bullets": ["…"]}},
-  {{"layout": "table", "title": "…", "table": [["欄名A", "欄名B"], ["值", "值"]]}},
-  {{"layout": "compare", "title": "…", "left": {{"heading": "…", "bullets": ["…"]}}, "right": {{"heading": "…", "bullets": ["…"]}}}},
+  {{"layout": "assertion", "title": "…", "icon": "growth", "bullets": ["…", "…", "…", "…"], "note": "資料來源：…"}},
+  {{"layout": "bignumber", "title": "…", "number": "11", "caption": "這個數字是什麼", "bullets": ["…", "…", "…"]}},
+  {{"layout": "table", "title": "…", "table": [["欄名A", "欄名B", "欄名C"], ["值", "值", "值"], ["值", "值", "值"], ["值", "值", "值"], ["值", "值", "值"]]}},
+  {{"layout": "compare", "title": "…", "left": {{"heading": "…", "bullets": ["…", "…", "…"]}}, "right": {{"heading": "…", "bullets": ["…", "…", "…"]}}}},
   {{"layout": "quote", "title": "…", "quote": "從來源原樣抄的一句", "by": "出處"}}
  ]}}
 
+【材料包】程式依大綱每一頁的標題與引文，從來源檔挑出最相關的段落（〔〕裡是檔名）。要點優先從這裡挑事實改寫成短句；
+不夠再自己回來源檔找。不要寫行號、頁碼括號，也不要只寫作者年份當一條要點（出處放 note）。
+{materials}
+
 規則：
 - 數字、年份、作者、刊名、DOI 從來源檔原樣抄，不可以換算、四捨五入或自己補。
-- 每頁最多 5 條要點，每條最多 45 個字。要點是你【濃縮過】的短句，不要把大綱裡的引文整句貼上來。
+- 【份量下限，build 會檢查】assertion 3–4 條要點；bignumber 數字下面 3 條；compare 左右各 3 條；table 至少 4 列資料、3 欄（不含欄名）。
+- 每條是一句 15–70 字的完整事實（compare 45 字內、bignumber 55 字內），把數字和來源裡的條件、比較對象或作者的解釋一起寫，例如「先離線用 80,000 組蒙地卡羅模擬資料訓練網路，再線上用確定性優化器校準」，不是「離線學習」這種關鍵字或半句話。開頭可以加冒號小標（例如「訓練資料：…」），會自動加粗，不加也可以；不要把大綱裡的引文整句貼上來。
+- 每頁至少用到材料包裡 3 段不同的材料。
+- 細節只寫來源裡有的：條件、比較對象、作者自己的解釋。不要自己補「突破傳統限制」「結果更穩定」「已成功實施」這類來源沒寫的推論或誇大；出處寫在 note，不要每條後面加（作者）。
+- 寫每一頁前先回來源檔找材料：樣本、期間、方法、數字結果、作者的解釋、限制，都是可以放的事實。一頁只有一兩行，聽眾會覺得沒內容。
 - 【每條要點都要有一個具體事實】：數字、年份、樣本數、倍數、方法或作者名稱，從來源原樣抄。「預測精度提升」「適用多種市場」這種沒有事實的形容會被 build 擋下來。
 - 【每頁挑一個圖示】放在 "icon"：{icons}。挑最貼近這頁意思的（加速→speed、資料→data、風險→warning、提問→question）；不寫會依標題自動挑，寫 none 就不放。
 - 標題最多兩行（約 40 個中文字），太長會壓到內容。
-- section（章節頁）只顯示標題，不要在上面寫 bullets；結尾的「小結」要列出重點的話，用 assertion。
+- section（章節頁）只顯示標題，不要在上面寫 bullets；結尾的「小結」用 assertion，列 3–4 條重點。
 - 內容只能來自來源檔（literature.md、notes/、sources/）。來源沒寫的案例、模型名稱、結論，一律不可以出現。
 
 寫完後執行：{me} build
@@ -352,7 +426,7 @@ def file_list():
 def src_list(): return ", ".join(f'"{p}"' for p in sources())
 
 def deck_howto(st):
-    return DECK_HOWTO.format(theme=st["theme"], srcs=src_list(), me=ME, icons=" / ".join(B.ICONS))
+    return DECK_HOWTO.format(theme=st["theme"], srcs=src_list(), me=ME, icons=" / ".join(B.ICONS), materials=materials_text(parse_outline()[1]))
 
 def angle_howto(st):
     return ANGLE_HOWTO.format(files=file_list(), me=ME, digest=digest_sources(), audience=st.get("audience") or "（使用者交給你決定）",
@@ -360,8 +434,10 @@ def angle_howto(st):
 
 def outline_howto(st):
     lo, hi = page_bounds(st)
+    m = int(st.get("minutes") or 10); allow = max(1, m // 10)
     return OUTLINE_HOWTO.format(files=file_list(), me=ME, angle=st.get("angle") or "（由你決定）", lo=lo, hi=hi,
-                                audience=st.get("audience") or "（使用者交給你決定：寫出誰、已經知道什麼）", minutes=st.get("minutes") or 10)
+                                audience=st.get("audience") or "（使用者交給你決定：寫出誰、已經知道什麼）", minutes=st.get("minutes") or 10,
+                                m_sec="只能放開場那 1 頁" if allow == 1 else f"最多 {allow} 頁", need=-(-m * 6 // 10))
 
 def page_howto(st):
     _, rows = parse_outline(); i = st["page"]; r = rows[i - 1]
@@ -369,7 +445,8 @@ def page_howto(st):
     if i == 1:
         head = ("\n這是第一頁，先建立 deck.json 的外框：\n"
                 f'{{"title": "封面標題", "subtitle": "副標題", "theme": "{st["theme"]}", "sources": [{src_list()}], "slides": []}}\n')
-    return PAGE_HOWTO.format(i=i, n=len(rows), layout=r["layout"], title=r["title"], head=head, me=ME, icons=" / ".join(B.ICONS))
+    return PAGE_HOWTO.format(i=i, n=len(rows), layout=r["layout"], title=r["title"], head=head, me=ME, icons=" / ".join(B.ICONS),
+                             materials=materials_text(rows, only=i))
 
 def warn_unknown():
     u = unknown_sources()

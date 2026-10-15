@@ -4,7 +4,7 @@
 建完會自動檢查並印出結果：
   [字型] 每一段文字都有東亞字型（<a:ea>）
   [大綱] 每一頁的標題都出自確認過的 outline.md
-  [份量] 標題不籠統、每頁要點數與字數沒超過上限、版面有變化
+  [份量] 標題不籠統、每頁要點數與字數在上下限之間、版面有變化
   [語言] 沒有簡體字
   [來源] 投影片裡的數字、DOI、ISSN 都能在 sources 列的檔案裡找到
 [大綱]、[語言] 或 [來源] 沒過時結束代碼為 2。加 --pdf 會另存一份 slides.pdf 方便預覽（需要 LibreOffice）。
@@ -26,7 +26,13 @@ for _stream in (sys.stdout, sys.stderr):
 # 中文要正確顯示，必須把字型寫進「東亞字型槽」<a:ea>；只設一般字型名稱的話，中文會掉到新細明體
 EA = {"Windows": "Microsoft JhengHei", "Darwin": "PingFang TC"}.get(platform.system(), "Noto Sans CJK TC")
 LATIN = "Arial"
-MAX_BULLETS, MAX_CHARS, MAX_SAME_LAYOUT = 5, 45, 3
+MAX_BULLETS, MAX_CHARS, MAX_SAME_LAYOUT = 5, 70, 3
+MAX_CHARS_BY = {"compare": 45, "bignumber": 55}   # 窄欄放不下 70 字
+# 份量下限（2026-10-15）：只有上限時模型一頁只寫 1–2 條就交差
+MIN_BULLETS = {"assertion": 3, "bignumber": 3, "compare": 3}   # compare 是每一欄各自的下限
+MAX_BY = {"assertion": 4}   # 2026-10-15 B 方案：份量逼太多，gpt-oss 會自己補來源沒有的細節
+MAX_COMPARE = 3   # 兩欄對照每欄 4 條長句會超出頁面底部
+MIN_CHARS, MIN_CONCRETE, MIN_TABLE_ROWS, MIN_TABLE_COLS = 15, 2, 4, 3   # 每條字數、assertion／compare 至少幾條帶具體事實、table 至少幾列資料（不含欄名）
 MAX_SECTIONS = 2   # 章節頁最多連續 2 頁（例如「小結」接「Q&A」）
 LAYOUTS = ("section", "assertion", "bignumber", "table", "compare", "quote")
 NO_PICTURE = re.compile(r"流程圖|折線圖|長條圖|圓餅圖|直方圖|走勢圖|示意圖|散[布佈]圖|曲線圖|圖表|配圖|插圖|照片|截圖")   # 工具畫不出來的東西（小圖示 icon 可以）
@@ -131,6 +137,10 @@ def text(slide, l, t, w, h, lines, size, color, bold=False, bullet=None, align=P
             clr = pPr.makeelement(qn("a:buClr"), {}); c = clr.makeelement(qn("a:srgbClr"), {"val": bullet}); clr.append(c); pPr.append(clr)
             pPr.append(pPr.makeelement(qn("a:buFont"), {"typeface": "Arial"}))
             pPr.append(pPr.makeelement(qn("a:buChar"), {"char": "■" if size < 30 else "•"}))
+        head = LEAD.match(plain(line)) if bullet else None
+        if head:   # 「小標：內容」→ 冒號前加粗（選用）
+            r = p.add_run(); r.text = head.group(1); style(r, size, True, color)
+            line = plain(line)[head.end(1):]
         r = p.add_run(); r.text = plain(line); style(r, size, bold, color)
 
 def box(slide, l, t, w, h, color):
@@ -165,8 +175,21 @@ def footer(s, th, sl, n, total):
         text(s, 0.8, 6.92, 10.6, 0.4, sl["note"], 11, th["muted"])
     text(s, 11.5, 6.92, 1.1, 0.4, f"{n} / {total}", 11, th["muted"], align=PP_ALIGN.RIGHT)
 
-def bullets(s, th, l, t, w, items, size=None):
-    text(s, l, t, w, 4.4, items, size or th["b_size"], th["ink"], bullet=th["accent"], space=14)
+LEAD = re.compile(r"^([^：:]{2,14}[：:])")   # 要點開頭的「重點：」
+
+def fit(items, w, h, size, space=14, floor=16):
+    """字多就縮小：估算每條折幾行，總高度超過 h 吋就一級一級縮，最小 floor pt。"""
+    units = lambda x: sum(2 if ord(ch) > 0x2E7F else 1 for ch in plain(x))
+    while size > floor:
+        per = max(1, int((w - 0.35) * 72 / size * 2 * 0.95))
+        tall = sum(-(-units(x) // per) * size * 1.25 + space for x in items) / 72
+        if tall <= h: break
+        size -= 1
+    return size
+
+def bullets(s, th, l, t, w, items, size=None, h=4.4):
+    size = fit(items, w, h, size or th["b_size"])
+    text(s, l, t, w, h, items, size, th["ink"], bullet=th["accent"], space=14)
 
 def add_table(s, th, rows, top):
     n, m = len(rows), max(len(r) for r in rows)
@@ -283,6 +306,8 @@ def bignumber_ok(sl, blob):
         elif not re.search(whole, blob): return False
     return True
 
+# 文獻卡裡的頁碼與引註（「第 20 頁」「Section 4.1」「[17, 24]」）不是研究結果：不拿掉的話，「收斂於 20 次迭代」會靠「第 20 頁」過關（2026-10-15 實測）
+CITE_MARKS = re.compile(r"第\s*\d+\s*頁|\[[\d,\s–\-]+\]|(?:Section|Sec\.|Table|Fig\.?|Figure|Eq\.?)\s*[\d.]+|\bpp?\.\s*\d+(?:\s*[–\-]\s*\d+)?")
 def check_sources(deck, base):
     srcs = deck.get("sources") or []
     if not srcs:
@@ -292,6 +317,7 @@ def check_sources(deck, base):
         if not (base / p).exists():
             return None, f"來源檔不存在：{p}"
         blob += (base / p).read_text(encoding="utf-8", errors="replace") + "\n"
+    blob = CITE_MARKS.sub(" ", blob)
     missing = []
     for i, sl in enumerate([{"title": deck.get("title", ""), "subtitle": deck.get("subtitle", "")}] + deck["slides"]):
         found = set()
@@ -322,6 +348,11 @@ def not_in_source(text, blob):
             if not re.search(pat, blob): out.add(x)
         elif k not in blob:
             out.add(x)
+    # 個位數＋單位（「約 2 ms」「3 倍」）：facts() 只抓兩位數以上，個位數要連單位一起在來源找到（2026-10-15 實測 gpt-oss 編出「2 ms」）
+    for n, u in re.findall(r"(?<![\d.,])(\d(?:\.\d+)?)\s*(ms|µs|μs|毫秒|微秒|秒|分鐘|小時|倍)", text):
+        g = next((grp for grp in UNITS if u in grp), (u,))
+        if not re.search(r"(?<![\d.])" + re.escape(n) + r"\s*(?:" + "|".join(re.escape(v) for v in g) + ")", blob):
+            out.add(n + " " + u)
     return out
 
 def check_outline(deck, base):
@@ -352,12 +383,39 @@ def check_language(deck):
 # 「具體」＝有數字、英文名稱（模型名、方法名、作者）或引號裡的原文
 CONCRETE = re.compile(r"\d|「[^」]+」")
 def concrete(x, title):
-    """要點有沒有具體事實：數字、「」引文，或標題裡沒出現過的英文名稱（「ANN 表現較佳」裡的 ANN 已在標題，不算）"""
+    """要點有沒有具體事實：數字、「」引文，或標題裡沒出現過的英文名稱（「ANN 表現較佳」裡的 ANN 已在標題，不算）。
+    作者年份與行號不算事實，先拿掉再看。"""
+    x = strip_ref(x)
     return bool(CONCRETE.search(x)) or any(w.lower() not in title.lower() for w in re.findall(r"[A-Za-z][A-Za-z\-]{2,}", x))
+
+# 湊數（2026-10-15 實測 gpt-oss 會這樣過關）：只寫出處的要點、文獻卡的行號、半句話、同一個數字到處放
+LINE_REF = re.compile(r"[（(]?\s*第\s*\d+\s*行\s*[)）]?")
+CITE = re.compile(r"[A-Z][A-Za-z\-]+(?:,\s*[A-Z]\.)*(?:(?:\s*,?\s*(?:&|and)\s*|\s*,\s*)[A-Z][A-Za-z\-]+(?:,\s*[A-Z]\.)*)*(?:\s+et\s+al\.?)?\s*[（(]\s*(\d{4})\s*[)）]")
+def strip_ref(x):
+    """拿掉作者年份「Ruf & Wang (2020)」、引用年份本身（「於 2020 年」）與行號「（第 50 行）」，剩下的才是內容。"""
+    years = CITE.findall(x)
+    x = LINE_REF.sub("", CITE.sub("", x))
+    for y in years: x = re.sub(r"(?:於\s*)?" + y + r"\s*年?", "", x)
+    return x
+TAIL_SRC = re.compile(r"\s*[（(][^（）()]*(?:\.md|[A-Z][a-z]+(?:\s*(?:&|and|et al\.?)\s*[A-Z]?[a-z]*)?(?:\s*,?\s*\d{4})?)[)）]\s*[。.]?$")
+PLACEHOLDER = {"重點", "細節", "要點", "關鍵詞", "關鍵字", "重點一", "重點二", "重點三", "說明"}
+def body_len(x):
+    """要點的字數，不算結尾的（Horvath）（某檔.md）這類出處"""
+    return len(TAIL_SRC.sub("", x))
+def filler(x):
+    """拿掉出處之後幾乎沒剩字：「Ruf & Wang (2020) 為本文之文獻回顧」「Ruf & Wang (2020) 於 2020 年指出此策略」"""
+    return bool(CITE.search(x) or LINE_REF.search(x)) and len(re.sub(r"[\W_]", "", strip_ref(x))) < 10 and not re.search(r"\d", strip_ref(x))
+def numbers_of(sl):
+    """這一頁要點與表格裡的數字（兩位數以上；年份也算），用來找出到處重複的同一個數字"""
+    texts = [x for b in [sl.get("bullets") or []] + [sl[k].get("bullets") or [] for k in ("left", "right") if sl.get(k)] for x in b]
+    texts += [str(c) for row in (sl.get("table") or [])[1:] for c in row]
+    return {n.replace(",", "") for t in texts for n in re.findall(r"\d[\d,]*\.?\d*", strip_ref(t)) if len(re.sub(r"\D", "", n)) >= 2}
 
 def check_size(deck):
     warn, run, prev = [], 0, None
+    seen = {}
     for i, sl in enumerate(deck["slides"], 1):
+        for n in numbers_of(sl): seen.setdefault(n, []).append(i)
         kind = layout_of(sl); run = run + 1 if kind == prev else 1; prev = kind
         if run == MAX_SAME_LAYOUT + 1 and kind != "section":
             warn.append(f"第 {i} 頁起連續 {run} 頁都是 {kind} 版面，換一種版面或插一頁章節頁")
@@ -374,14 +432,37 @@ def check_size(deck):
             warn.append(f"第 {i} 頁標題太長（會折成 3 行以上、壓到內容）：{sl['title'][:20]}…，請縮短到兩行內（大綱要一起改）")
         groups = [sl.get("bullets") or []] + [sl[k].get("bullets") or [] for k in ("left", "right") if sl.get(k)]
         flat = [x for b in groups for x in b]
-        if kind == "assertion" and len(sl.get("bullets") or []) < 2:
-            warn.append(f"第 {i} 頁只有 {len(sl.get('bullets') or [])} 條要點：assertion 至少要 2 條證據支持標題")
-        if kind in ("assertion", "compare") and flat and not any(concrete(x, sl["title"]) for x in flat):
-            warn.append(f"第 {i} 頁的要點都是形容詞，沒有具體事實：至少一條要放來源裡的數字、年份、樣本數或名稱（原樣抄）")
+        need = MIN_BULLETS.get(kind, 0)
+        sides = zip(["左欄", "右欄"], groups[1:]) if kind == "compare" else [("", groups[0])]
+        for side, b in sides:
+            if len(b) < need:
+                warn.append(f"第 {i} 頁{side}只有 {len(b)} 條要點（{kind} 至少 {need} 條）：回來源檔再找 {need - len(b)} 個和標題有關的事實補上")
+        if kind in MIN_BULLETS:
+            warn += [f"第 {i} 頁有一條只有 {body_len(x)} 字（至少 {MIN_CHARS} 字）：「{x}」，寫成一句完整的事實：把來源裡的數字、條件、比較對象或作者的解釋一起寫進去" for x in flat if body_len(x) < MIN_CHARS]
+        if kind in ("assertion", "compare") and flat and sum(concrete(x, sl["title"]) for x in flat) < MIN_CONCRETE:
+            warn.append(f"第 {i} 頁帶具體事實的要點不到 {MIN_CONCRETE} 條：要點要放來源裡的數字、年份、樣本數或名稱（原樣抄），不要寫形容詞")
+        if sum(bool(TAIL_SRC.search(x)) for x in flat) >= 2:
+            warn.append(f"第 {i} 頁的要點後面都加了（作者）或（檔名）：出處寫在這頁的 note 一次就好，要點裡放內容")
+        ph = [x for x in flat if LEAD.match(plain(x)) and LEAD.match(plain(x)).group(1)[:-1].strip() in PLACEHOLDER]
+        if ph:
+            warn.append(f"第 {i} 頁有 {len(ph)} 條用「{LEAD.match(plain(ph[0])).group(1)}」開頭：冒號前要寫這條自己的小標（例如「訓練資料：」），或乾脆不加小標，不是照抄範本")
+        if any(LINE_REF.search(x) for x in flat):
+            warn.append(f"第 {i} 頁的要點寫了「第 N 行」：那是文獻卡的行號，聽眾看不懂，拿掉")
+        warn += [f"第 {i} 頁有一條只有出處、沒有內容：「{x}」，換成來源裡的一個事實（出處放 note）" for x in flat if filler(x)]
+        warn += [f"第 {i} 頁有一條沒寫完：「{x}」，一條要點是一句完整的話，不要把一句拆成兩條" for x in flat if re.search(r"[，,；;、：:]\s*$", x)]
+        if kind == "table" and len(sl.get("table") or []) - 1 < MIN_TABLE_ROWS:
+            warn.append(f"第 {i} 頁的表格只有 {len(sl.get('table') or []) - 1} 列資料（至少 {MIN_TABLE_ROWS} 列）：回來源找更多筆，例如樣本、期間、方法、結果各一列")
+        if kind == "table" and sl.get("table") and max(len(r) for r in sl["table"]) < MIN_TABLE_COLS:
+            warn.append(f"第 {i} 頁的表格只有 {max(len(r) for r in sl['table'])} 欄（至少 {MIN_TABLE_COLS} 欄）：加一欄數字或出處")
         for b in groups:
-            if len(b) > MAX_BULLETS:
-                warn.append(f"第 {i} 頁有 {len(b)} 條要點（上限 {MAX_BULLETS}）")
-            warn += [f"第 {i} 頁有一條 {len(x)} 字（上限 {MAX_CHARS}）：{x[:18]}…" for x in b if len(x) > MAX_CHARS]
+            cap = MAX_COMPARE if kind == "compare" else MAX_BY.get(kind, MAX_BULLETS)
+            if len(b) > cap:
+                warn.append(f"第 {i} 頁有 {len(b)} 條要點（{'每欄' if kind == 'compare' else ''}上限 {cap}）")
+            lim = MAX_CHARS_BY.get(kind, MAX_CHARS)
+            warn += [f"第 {i} 頁有一條 {len(x)} 字（{kind} 上限 {lim}）：{x[:18]}…" for x in b if len(x) > lim]
+    for n, pages in seen.items():
+        if len(pages) >= 3:
+            warn.append(f"同一個數字 {n} 出現在第 {'、'.join(map(str, pages))} 頁：每個事實講一次就好，其他頁回來源找別的事實")
     return warn
 
 def validate(deck):
